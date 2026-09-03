@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base href="/">
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="theme-color" content="#2A9849">
+
+  <title>Pickles and Pies - Multi-vendor Food, Grocery, eCommerce, Pharmacy & Parcel Service</title>
+  <meta name="description" content="Pickles and Pies is a multi-vendor platform for food, grocery, eCommerce, pharmacy and parcel delivery service.">
+  <meta name="keywords" content="food delivery, grocery delivery, eCommerce, pharmacy, parcel service, multi-vendor, online shopping, ride share, taxi, services">
+  <meta name="author" content="Pickles and Pies">
+  <meta name="robots" content="index, follow">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://admin.ppdeli.com/">
+  <meta property="og:title" content="Pickles and Pies">
+  <meta property="og:description" content="Multi-vendor Food, Grocery, eCommerce, Pharmacy & Parcel service.">
+  <meta property="og:image" content="https://admin.ppdeli.com/logo.png">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:site_name" content="Pickles and Pies">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://admin.ppdeli.com/">
+  <meta property="twitter:title" content="Pickles and Pies">
+  <meta property="twitter:description" content="Multi-vendor Food, Grocery, eCommerce, Pharmacy & Parcel service.">
+  <meta property="twitter:image" content="https://admin.ppdeli.com/logo.png">
+
+  <link rel="canonical" href="https://admin.ppdeli.com/">
+  <link rel="alternate" type="text/html" hreflang="en" href="https://admin.ppdeli.com/privacy.html" title="Privacy Policy">
+  <link rel="alternate" type="text/html" hreflang="en" href="https://admin.ppdeli.com/terms.html" title="Terms of Service">
+
+  <!-- iOS PWA meta tags & icons -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Pickles and Pies">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" type="text/css" href="style.css">
+
+  <!-- Google Sign-In client ID -->
+  <meta name="google-signin-client_id" content="491987943015-agln6biv84krpnngdphj87jkko7r9lb8.apps.googleusercontent.com">
+
+  <!-- Apple Sign-In -->
+  <script type="text/javascript" src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js" defer></script>
+
+  <!-- DNS prefetch & preconnect for performance -->
+  <link rel="dns-prefetch" href="//maps.googleapis.com">
+  <link rel="dns-prefetch" href="//www.gstatic.com">
+  <link rel="preconnect" href="https://maps.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+
+  <!-- Google Maps API (key is injected at build time via --dart-define) -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_MAP_KEY" async defer></script>
+
+  <!-- Flutter Web support script -->
+  <script type="application/javascript" src="/assets/packages/flutter_inappwebview_web/assets/web/web_support.js" defer></script>
+
+  <script>
+    // The value below is injected by flutter build, do not touch.
+    var serviceWorkerVersion = '{{flutter_service_worker_version}}';
+  </script>
+
+  <!-- Flutter bootstrap script -->
+  <script src="flutter.js?version=3.9.0" defer></script>
+</head>
+
+<body>
+  <!-- Preloader shown until Flutter first frame is painted -->
+  <div class="preloader" id="app-preloader">
+    <div class="preloader-container">
+      <img width="50" class="preloader-img" src="favicon.png" alt="Pickles and Pies">
+      <div class="loader"></div>
+    </div>
+  </div>
+
+  <!-- Static placeholder header (visible while Flutter loads) -->
+  <header class="header" role="banner">
+    <div class="header-container d-flex align-items-center justify-content-between">
+      <div class="header-start d-flex gap-5 align-items-center">
+        <img class="logo" src="logo.png" alt="Pickles and Pies">
+      </div>
+    </div>
+  </header>
+
+  <!-- Apply persisted theme from localStorage to avoid flash of unstyled content -->
+  <script>
+    (function () {
+      try {
+        var stored = window.localStorage.getItem('flutter.picklespies_theme');
+        if (stored === 'true') {
+          document.documentElement.classList.add('theme-dark');
+        } else {
+          document.documentElement.classList.remove('theme-dark');
+        }
+      } catch (e) {
+        // localStorage may be blocked (private mode, etc.) — silently ignore.
+      }
+    })();
+  </script>
+
+  <!-- Replace inline SVG <img> tags with their inline <svg> content -->
+  <script>
+    (function () {
+      function inlineSvgImages() {
+        var imgs = document.querySelectorAll('img.svg');
+        imgs.forEach(function (img) {
+          var url = img.getAttribute('src');
+          if (!url) return;
+          fetch(url, { credentials: 'same-origin' })
+            .then(function (r) {
+              if (!r.ok) throw new Error('Failed to load SVG: ' + url);
+              return r.text();
+            })
+            .then(function (svgText) {
+              var parser = new DOMParser();
+              var doc = parser.parseFromString(svgText, 'image/svg+xml');
+              var svg = doc.querySelector('svg');
+              if (!svg) return;
+              if (img.id) svg.id = img.id;
+              if (img.className) svg.setAttribute('class', img.className + ' replaced-svg');
+              svg.removeAttribute('xmlns:a');
+              if (!svg.getAttribute('viewBox') && svg.getAttribute('height') && svg.getAttribute('width')) {
+                svg.setAttribute('viewBox', '0 0 ' + svg.getAttribute('height') + ' ' + svg.getAttribute('width'));
+              }
+              img.parentNode.replaceChild(svg, img);
+            })
+            .catch(function () { /* ignore individual SVG failures */ });
+        });
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', inlineSvgImages);
+      } else {
+        inlineSvgImages();
+      }
+    })();
+  </script>
+
+  <!-- Flutter app bootstrap -->
+  <script>
+    window.addEventListener('load', function () {
+      if (typeof _flutter === 'undefined' || !_flutter || !_flutter.loader) {
+        // Flutter loader missing — remove preloader so user is not stuck.
+        var p = document.getElementById('app-preloader');
+        if (p) p.remove();
+        return;
+      }
+      _flutter.loader.load({
+        serviceWorker: {
+          serviceWorkerVersion: serviceWorkerVersion,
+        },
+        onEntrypointLoaded: function (engineInitializer) {
+          var config = { renderer: 'html' };
+          engineInitializer.initializeEngine(config).then(function (appRunner) {
+            var splash = document.getElementById('splash');
+            if (splash) splash.remove();
+            var preloader = document.getElementById('app-preloader');
+            if (preloader) preloader.remove();
+            appRunner.runApp();
+          });
+        }
+      });
+    });
+  </script>
+
+  <!-- Firebase Analytics (compat shim for older browsers; uses standard init) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-analytics.js" defer></script>
+  <script>
+    window.addEventListener('load', function () {
+      if (typeof firebase === 'undefined' || !firebase.initializeApp) return;
+      try {
+        firebase.initializeApp({
+          apiKey: 'AIzaSyCXgsQ0vyOq3eTNX5iW1N2AurhYMNDUvlY',
+          appId: '1:422412778152:web:622a0d81c8f4752f24e09d',
+          messagingSenderId: '422412778152',
+          projectId: 'ppdeli-f07a9',
+          authDomain: 'ppdeli-f07a9.firebaseapp.com',
+          databaseURL: 'https://ppdeli-f07a9-default-rtdb.firebaseio.com',
+          storageBucket: 'ppdeli-f07a9.firebasestorage.app',
+          measurementId: 'G-BT2NW6JTWF'
+        });
+        if (firebase.analytics) firebase.analytics();
+      } catch (e) {
+        // Firebase init is optional analytics; ignore failures.
+      }
+    });
+  </script>
+</body>
+</html>

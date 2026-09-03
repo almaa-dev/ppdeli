@@ -1,0 +1,9 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.ppdeli.market",
+    "sha256_cert_fingerprints":
+    ["CA:5C:53:98:2D:1A:F1:24:C0:00:8B:54:9C:16:90:A1:05:1D:54:2F:3B:9B:A6:7D:34:84:6B:CB:12:68:AF:2A"]
+  }
+}]
