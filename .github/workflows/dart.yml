@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - "23-6-2026"
+      - "main"
   pull_request:
     branches:
       - "23-6-2026"
+      - "main"
   workflow_dispatch:
 
 jobs:
@@ -34,8 +36,9 @@ jobs:
         with:
           fetch-depth: 1
 
+      # تم التحديث إلى v5 لحل تحذير setup-java v4
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -48,13 +51,9 @@ jobs:
           channel: stable
           cache: true
 
+      # تم إصلاح الخطأ بحذف المدخل الخاطئ gradle-home-cache-caches
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-home-cache-caches: |
-            caches
-            notifications
-            wrapper
 
       - name: Cache Pub Packages
         uses: actions/cache@v4
