@@ -40,6 +40,7 @@ import 'package:pickles_and_pies/features/checkout/widgets/bottom_section.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/top_section.dart';
 import 'package:flutter/material.dart';
 
+import 'path/to/delivery_fee_resolver.dart'; // استبدل المسار بالمسار الصحيح للملف
 
 class CheckoutScreen extends StatefulWidget {
   final List<CartModel?>? cartList;
