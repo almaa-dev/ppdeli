@@ -1,4 +1,5 @@
 import 'package:country_code_picker/country_code_picker.dart';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,10 +9,14 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as path;
 import 'package:phone_numbers_parser/phone_numbers_parser.dart';
 import 'package:pickles_and_pies/api/api_checker.dart';
 import 'package:pickles_and_pies/features/cart/controllers/cart_controller.dart';
+import 'package:pickles_and_pies/features/checkout/data/cache/delivery_service_hours_cache.dart';
+import 'package:pickles_and_pies/features/checkout/domain/helpers/delivery_hours_resolver.dart';
+import 'package:pickles_and_pies/features/checkout/domain/models/delivery_service_hours_model.dart';
 import 'package:pickles_and_pies/features/checkout/domain/models/payment_model.dart';
 import 'package:pickles_and_pies/features/checkout/domain/models/saved_prescription_model.dart';
 import 'package:pickles_and_pies/features/checkout/domain/models/surge_price_model.dart';
@@ -44,7 +49,16 @@ import 'package:universal_html/html.dart' as html;
 
 class CheckoutController extends GetxController implements GetxService {
   final CheckoutServiceInterface checkoutServiceInterface;
-  CheckoutController({required this.checkoutServiceInterface});
+  final SharedPreferences sharedPreferences;
+  CheckoutController({required this.checkoutServiceInterface, required this.sharedPreferences});
+
+  /// Helper exposed for tests; in production use [loadDeliveryServiceHours].
+  @visibleForTesting
+  DeliveryServiceHoursCache get debugDeliveryHoursCache =>
+      DeliveryServiceHoursCache(sharedPreferences: sharedPreferences);
+
+  /// Resolver is a pure object, safe to reuse.
+  final DeliveryHoursResolver _deliveryHoursResolver = DeliveryHoursResolver();
 
   static const int maxPrescriptionFileCount = 5;
   static const int maxPrescriptionSaveBatchCount = 5;
@@ -145,6 +159,43 @@ class CheckoutController extends GetxController implements GetxService {
   String? _orderType = 'delivery';
   String? get orderType => _orderType;
 
+  // ===========================================================================
+  // DELIVERY SERVICE HOURS
+  // ===========================================================================
+  //
+  // Single source of truth for the availability of Home Delivery based on the
+  // store's weekly schedule. This block is fed from THREE sources, in order:
+  //   1) Default 08:00-18:00 schedule (constant fallback).
+  //   2) Local cache (per Store ID), read synchronously before render.
+  //   3) Server data extracted from the existing getStoreDetails() response.
+  //
+  // The current store is tracked via [_deliveryHoursStoreId] so cache and
+  // server data are never mixed across stores. [_deliveryHoursLoadedForStoreId]
+  // prevents duplicate server reads when [loadDeliveryServiceHours] is invoked
+  // more than once per Checkout lifecycle.
+  //
+  // No background polling, no rebuild-driven refetch, and no calls from
+  // build() / Obx / GetBuilder - per the spec.
+  // ===========================================================================
+  DeliveryServiceHours? _deliveryHours;
+  DeliveryServiceHours? get deliveryHours => _deliveryHours;
+
+  bool _isDeliveryAvailable = false;
+  bool get isDeliveryAvailable => _isDeliveryAvailable;
+
+  String? _deliveryHoursOpeningLabel;
+  String? _deliveryHoursClosingLabel;
+  String? get deliveryHoursOpeningLabel => _deliveryHoursOpeningLabel;
+  String? get deliveryHoursClosingLabel => _deliveryHoursClosingLabel;
+
+  bool _isDeliveryDayActive = true;
+  bool get isDeliveryDayActive => _isDeliveryDayActive;
+
+  int? _deliveryHoursStoreId;
+  int? _deliveryHoursLoadedForStoreId;
+  bool _deliveryHoursRequestInFlight = false;
+  bool _deliveryHoursHasFreshServerData = false;
+
   double _viewTotalPrice = 0;
   double? get viewTotalPrice => _viewTotalPrice;
 
@@ -159,6 +210,40 @@ class CheckoutController extends GetxController implements GetxService {
 
   String? _digitalPaymentName;
   String? get digitalPaymentName => _digitalPaymentName;
+
+  // ===========================================================================
+  // LAST PAYMENT METHOD PREFERENCE
+  // ===========================================================================
+  // These three fields mirror the values the user explicitly selected. They
+  // exist alongside the LIVE selection (_paymentMethodIndex / _digitalPayment
+  // Name / _selectedOfflineBankIndex) so we can distinguish:
+  //
+  //   1) Live selection        — currently visible in PaymentSection
+  //   2) Saved preference      — what was last persisted across orders
+  //   3) Confirmation state    — whether the live selection is CONFIRMED for
+  //                              THIS specific order
+  //
+  // IMPORTANT: the saved preference is NEVER treated as a confirmation. A
+  // new order always starts with _paymentMethodConfirmed = false even when
+  // the saved preference is auto-applied to the live selection.
+  // ===========================================================================
+  int _savedPaymentMethodIndex = -1;
+  String? _savedDigitalPaymentName;
+  int? _savedOfflineBankIndex;
+  int get savedPaymentMethodIndex => _savedPaymentMethodIndex;
+  String? get savedDigitalPaymentName => _savedDigitalPaymentName;
+  int? get savedOfflineBankIndex => _savedOfflineBankIndex;
+
+  /// Whether the user has explicitly confirmed the CURRENT (live) payment
+  /// method for the CURRENT order. Reset to false on any of:
+  ///   - Checkout open (initCheckoutData)
+  ///   - User taps a different payment method
+  ///   - User changes digital gateway / offline bank
+  ///   - User clears the cart / leaves Checkout
+  ///
+  /// Only an explicit confirmation dialog "Confirm" tap can set this true.
+  bool _paymentMethodConfirmed = false;
+  bool get paymentMethodConfirmed => _paymentMethodConfirmed;
 
   List<SavedPrescriptionModel>? _savedPrescriptions;
   List<SavedPrescriptionModel>? get savedPrescriptions => _savedPrescriptions;
@@ -235,6 +320,14 @@ class CheckoutController extends GetxController implements GetxService {
   Future<void> initCheckoutData(int? storeId) async {
     Get.find<CouponController>().removeCouponData(false);
 
+    // Local-first delivery hours: read SharedPreferences cache and apply
+    // default 08:00-18:00 schedule BEFORE awaiting the store-details request.
+    // This guarantees an instant, deterministic UI render regardless of
+    // network latency, and the server response (delivered by StoreController
+    // through applyDeliveryHoursFromServer) refines availability at most
+    // once per Checkout lifecycle.
+    loadDeliveryServiceHours(storeId);
+
     _store = await Get.find<StoreController>().getStoreDetails(Store(id: storeId), false);
 
     if (_store != null) {
@@ -259,6 +352,27 @@ class CheckoutController extends GetxController implements GetxService {
 
       initializeTimeSlot(_store!);
     }
+
+    // -----------------------------------------------------------------------
+    // LAST PAYMENT METHOD PREFERENCE
+    // -----------------------------------------------------------------------
+    // Restore the persisted preference AFTER payment configuration is known
+    // (configModel, store, partial-pay rules, offline method list). The
+    // validation in applySavedPaymentMethodIfAvailable() ensures we never
+    // auto-apply a method that is currently disabled. Auto-selection is
+    // shown for convenience but is NEVER considered confirmed for the
+    // current order.
+    await loadSavedPaymentMethod();
+    final config = Get.find<SplashController>().configModel;
+    applySavedPaymentMethodIfAvailable(
+      isCashOnDeliveryActive: config?.cashOnDelivery ?? false,
+      isDigitalPaymentActive: config?.digitalPayment ?? false,
+      isWalletActive: (config?.customerWalletStatus ?? 0) == 1,
+      isOfflinePaymentActive: config?.offlinePaymentStatus ?? false,
+      isPartialPay: _isPartialPay,
+      partialPaymentMethod: config?.partialPaymentMethod ?? 'both',
+      isFirstTimeCodActive: _isFirstTimeCodActive,
+    );
   }
 
   void showTipsField(){
@@ -279,6 +393,9 @@ class CheckoutController extends GetxController implements GetxService {
   void setPaymentMethod(int index, {bool isUpdate = true}) {
     _paymentMethodIndex = index;
     if(_isFirstTimeCodActive) updateFirstTimeCodActive(isActive: false);
+    // Any manual change invalidates the previous confirmation. The user must
+    // explicitly confirm the new method for the current order.
+    _paymentMethodConfirmed = false;
     if(isUpdate){
       update();
     }
@@ -286,6 +403,9 @@ class CheckoutController extends GetxController implements GetxService {
 
   void changeDigitalPaymentName(String name, {bool willUpdate = true}){
     _digitalPaymentName = name;
+    // Changing the gateway inside "Digital Payment" is also a manual change,
+    // so we must invalidate the confirmation.
+    _paymentMethodConfirmed = false;
     if(willUpdate) {
       update();
     }
@@ -295,6 +415,229 @@ class CheckoutController extends GetxController implements GetxService {
     _orderType = type;
     if(notify) {
       update();
+    }
+  }
+
+  /// Called once by [initCheckoutData] (and once again on store change).
+  ///
+  /// Performs the LOCAL-FIRST sequence in the exact order required by the
+  /// spec:
+  ///   1) Reset per-store state (no cross-store leakage).
+  ///   2) Try SharedPreferences cache (sync, instant).
+  ///   3) Fall back to default 08:00-18:00 if no cache.
+  ///   4) Compute availability against current phone time.
+  ///   5) Mark UI dirty.
+  ///
+  /// No network call here. The server-side schedule is fed later via
+  /// [applyDeliveryHoursFromServer] - exactly one call per Checkout lifecycle.
+  void loadDeliveryServiceHours(int? storeId) {
+    final int? resolvedStoreId = storeId;
+    if (resolvedStoreId == null || resolvedStoreId <= 0) {
+      _resetDeliveryHoursState();
+      return;
+    }
+
+    // Store change: drop any in-flight server-side work for the previous store.
+    if (_deliveryHoursStoreId != resolvedStoreId) {
+      _deliveryHoursLoadedForStoreId = null;
+      _deliveryHoursHasFreshServerData = false;
+      _deliveryHoursRequestInFlight = false;
+    }
+    _deliveryHoursStoreId = resolvedStoreId;
+
+    final DeliveryServiceHoursCache cache =
+        DeliveryServiceHoursCache(sharedPreferences: sharedPreferences);
+
+    DeliveryServiceHours? resolved;
+    final String? cachedJson = cache.readSync(resolvedStoreId);
+    if (cachedJson != null && cachedJson.isNotEmpty) {
+      try {
+        final dynamic decoded = jsonDecode(cachedJson);
+        if (decoded is Map) {
+          final DeliveryServiceHoursEnvelope envelope =
+              DeliveryServiceHoursEnvelope.fromJson(
+            Map<String, dynamic>.from(decoded),
+          );
+          if (envelope.isIntact && envelope.storeId == resolvedStoreId) {
+            resolved = envelope.schedule;
+          }
+        }
+      } catch (_) {
+        // Corrupted cache - silently fall through to default.
+      }
+    }
+
+    _applyDeliveryHours(resolved, isServerSource: false, persistToCache: false);
+    if (kDebugMode) {
+      debugPrint(
+        '[DeliveryHours] Loaded for store=$resolvedStoreId '
+        'source=${resolved == null ? "default" : "cache"} '
+        'available=$_isDeliveryAvailable',
+      );
+    }
+  }
+
+  /// Hook called by [StoreController] once the dedicated store-details
+  /// endpoint resolves. We deliberately reuse the existing single-flighted
+  /// `getStoreDetails()` request rather than issuing a second API call.
+  ///
+  /// `rawJson` is the exact body returned by `/api/v1/stores/details/{id}` -
+  /// the same envelope that already drives `Store.fromJson`. This method
+  /// extracts the optional `delivery_service_hours` / `delivery_service`
+  /// fields when present and persists them per-store in SharedPreferences.
+  ///
+  /// This method is idempotent: calling it twice for the same store with
+  /// the same payload is a no-op.
+  Future<void> applyDeliveryHoursFromServer({
+    required int storeId,
+    required Map<String, dynamic> rawJson,
+  }) async {
+    if (storeId <= 0) return;
+    if (_deliveryHoursRequestInFlight) return;
+    if (_deliveryHoursLoadedForStoreId == storeId &&
+        _deliveryHoursHasFreshServerData) {
+      // Already applied for this store during this Checkout lifecycle.
+      return;
+    }
+
+    _deliveryHoursRequestInFlight = true;
+    try {
+      if (_deliveryHoursStoreId != storeId) {
+        // Store changed mid-flight; reset and re-apply local cache/default
+        // first so the UI is consistent.
+        loadDeliveryServiceHours(storeId);
+      }
+
+      final DeliveryServiceHours? parsed =
+          _extractScheduleFromRawJson(rawJson, storeId);
+      final DeliveryServiceInfo info =
+          DeliveryServiceInfo.fromJson(rawJson);
+      if (parsed == null && !info.available && info.opensAt == null) {
+        // Server response legitimately carries no schedule data; nothing
+        // to do. Mark as "loaded" to prevent repeated parsing.
+        _deliveryHoursLoadedForStoreId = storeId;
+        _deliveryHoursHasFreshServerData = true;
+        return;
+      }
+
+      final DeliveryServiceHours? scheduleToApply =
+          parsed ?? _deliveryHours; // keep previous schedule if server omitted it
+
+      // Persist a fresh envelope, regardless of whether scheduleToApply is
+      // the parsed one or the previously-applied one.
+      final DeliveryServiceHoursEnvelope envelope =
+          DeliveryServiceHoursEnvelope(
+        storeId: storeId,
+        schedule: scheduleToApply ??
+            DeliveryServiceHours(
+              storeId: storeId,
+              days: DeliveryHoursResolver.defaultSchedule(),
+            ),
+        info: info,
+        schemaVersion: DeliveryServiceHoursEnvelope.currentSchemaVersion,
+      );
+      final String encoded = jsonEncode(envelope.toJson());
+      final DeliveryServiceHoursCache cache =
+          DeliveryServiceHoursCache(sharedPreferences: sharedPreferences);
+      await cache.write(storeId, encoded);
+
+      _applyDeliveryHours(scheduleToApply,
+          isServerSource: true, persistToCache: false);
+
+      _deliveryHoursLoadedForStoreId = storeId;
+      _deliveryHoursHasFreshServerData = true;
+      if (kDebugMode) {
+        debugPrint(
+          '[DeliveryHours] Server data applied for store=$storeId '
+          'available=$_isDeliveryAvailable',
+        );
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('[DeliveryHours] Server data parse failed: $error');
+      }
+      // Defensive: keep cache/default, mark "loaded" so we don't loop.
+      _deliveryHoursLoadedForStoreId = storeId;
+    } finally {
+      _deliveryHoursRequestInFlight = false;
+    }
+  }
+
+  /// Re-evaluates availability against the current phone time without
+  /// re-fetching server data or re-reading SharedPreferences. Safe to call
+  /// when the app resumes from background (no extra network cost).
+  void refreshDeliveryAvailabilityFromCurrentTime() {
+    if (_deliveryHours == null &&
+        _deliveryHoursStoreId == null &&
+        _deliveryHoursLoadedForStoreId == null) {
+      return;
+    }
+    _applyDeliveryHours(_deliveryHours,
+        isServerSource: _deliveryHoursHasFreshServerData,
+        persistToCache: false);
+  }
+
+  void _resetDeliveryHoursState() {
+    _deliveryHours = null;
+    _isDeliveryAvailable = false;
+    _deliveryHoursOpeningLabel = null;
+    _deliveryHoursClosingLabel = null;
+    _isDeliveryDayActive = true;
+    _deliveryHoursStoreId = null;
+    _deliveryHoursLoadedForStoreId = null;
+    _deliveryHoursHasFreshServerData = false;
+    _deliveryHoursRequestInFlight = false;
+  }
+
+  /// Applies the [schedule] (or default fallback when null) and updates the
+  /// public state. Single source of truth for [isDeliveryAvailable].
+  void _applyDeliveryHours(
+    DeliveryServiceHours? schedule, {
+    required bool isServerSource,
+    required bool persistToCache,
+  }) {
+    final DeliveryAvailability availability =
+        _deliveryHoursResolver.resolveAvailability(
+      now: DateTime.now(),
+      schedule: schedule,
+    );
+
+    final bool availabilityChanged =
+        availability.isDeliveryAvailable != _isDeliveryAvailable;
+    final bool labelChanged =
+        availability.openingTime != _deliveryHoursOpeningLabel ||
+            availability.closingTime != _deliveryHoursClosingLabel ||
+            availability.dayIsActive != _isDeliveryDayActive;
+
+    _deliveryHours = schedule;
+    _isDeliveryAvailable = availability.isDeliveryAvailable;
+    _isDeliveryDayActive = availability.dayIsActive;
+    final ({String opensAt, String closesAt})? labelTimes = availability.labelTimes;
+    _deliveryHoursOpeningLabel = labelTimes?.opensAt;
+    _deliveryHoursClosingLabel = labelTimes?.closesAt;
+
+    if (availabilityChanged || labelChanged) {
+      // If delivery just became unavailable, force order type to take_away.
+      if (!availability.isDeliveryAvailable && _orderType != 'take_away') {
+        _orderType = 'take_away';
+      }
+      update();
+    }
+  }
+
+  /// Extracts the schedule from the raw store-details body. Returns null
+  /// when the server payload does not contain any usable schedule.
+  DeliveryServiceHours? _extractScheduleFromRawJson(
+    Map<String, dynamic> rawJson,
+    int storeId,
+  ) {
+    try {
+      final DeliveryServiceHours schedule =
+          DeliveryServiceHours.fromJson(storeId, rawJson);
+      if (schedule.days.isEmpty) return null;
+      return schedule;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -370,7 +713,216 @@ class CheckoutController extends GetxController implements GetxService {
     _selectedTimeSlot = 0;
     _orderAttachment = null;
     _rawAttachment = null;
+    // Confirmation belongs to the current order only — reset it. The PERSISTED
+    // preference (_savedPaymentMethodIndex / _savedDigitalPaymentName /
+    // _savedOfflineBankIndex) is intentionally NOT cleared here; it must
+    // survive across orders so the next Checkout can restore the user's
+    // last selection for convenience.
+    _paymentMethodConfirmed = false;
   }
+
+  // ===========================================================================
+  // LAST PAYMENT METHOD — LOAD / APPLY / CONFIRM / INVALIDATE
+  // ===========================================================================
+
+  /// Returns a stable identity string used to scope the saved preference in
+  /// SharedPreferences. Logged-in users use their user id; guests use the
+  /// guest id; otherwise an "anonymous" bucket is used so we never silently
+  /// leak a preference across identities.
+  String _paymentPrefIdentity() {
+    try {
+      if (AuthHelper.isLoggedIn()) {
+        final userInfo = Get.find<ProfileController>().userInfoModel;
+        if (userInfo != null && userInfo.id != null) {
+          return 'user_${userInfo.id}';
+        }
+      }
+      final guestId = AuthHelper.getGuestId();
+      if (guestId.isNotEmpty) {
+        return 'guest_$guestId';
+      }
+    } catch (_) {
+      // Get.find can throw if a controller isn't registered yet during
+      // very early startup. Fall through to the anonymous bucket.
+    }
+    return 'anonymous';
+  }
+
+  /// Reads the persisted last-payment preference into the in-memory *_saved*
+  /// fields. Does NOT touch the live selection and does NOT mark anything as
+  /// confirmed. Safe to call at any time; never throws.
+  Future<void> loadSavedPaymentMethod() async {
+    try {
+      final raw = checkoutServiceInterface.getLastPaymentMethod(
+        identity: _paymentPrefIdentity(),
+      );
+      if (raw == null) {
+        _savedPaymentMethodIndex = -1;
+        _savedDigitalPaymentName = null;
+        _savedOfflineBankIndex = null;
+        return;
+      }
+      final idx = raw['method_index'];
+      if (idx is! int) {
+        _savedPaymentMethodIndex = -1;
+        return;
+      }
+      _savedPaymentMethodIndex = idx;
+      _savedDigitalPaymentName = raw['digital_payment_name'] is String
+          ? raw['digital_payment_name'] as String
+          : null;
+      _savedOfflineBankIndex = raw['offline_bank_index'] is int
+          ? raw['offline_bank_index'] as int
+          : null;
+    } catch (_) {
+      _savedPaymentMethodIndex = -1;
+      _savedDigitalPaymentName = null;
+      _savedOfflineBankIndex = null;
+    }
+  }
+
+  /// Attempts to auto-apply the saved preference to the LIVE selection.
+  ///
+  /// CRITICAL INVARIANTS:
+  ///   1) This method NEVER sets _paymentMethodConfirmed = true.
+  ///   2) The saved method is only applied if it is currently VALID for the
+  ///      present checkout context (COD enabled, wallet enabled, digital
+  ///      gateway still active, offline bank still listed, partial-payment
+  ///      rules respected, first-time-COD interstitial respected).
+  ///   3) If validation fails for any reason, the LIVE selection is reset
+  ///      to -1 — never silently switches to an unrelated fallback.
+  void applySavedPaymentMethodIfAvailable({
+    required bool isCashOnDeliveryActive,
+    required bool isDigitalPaymentActive,
+    required bool isWalletActive,
+    required bool isOfflinePaymentActive,
+    required bool isPartialPay,
+    required String partialPaymentMethod,
+    required bool isFirstTimeCodActive,
+  }) {
+    if (_savedPaymentMethodIndex == -1) {
+      _paymentMethodIndex = -1;
+      _paymentMethodConfirmed = false;
+      update();
+      return;
+    }
+
+    bool valid = false;
+    switch (_savedPaymentMethodIndex) {
+      case 0: // COD
+        valid = isCashOnDeliveryActive && !isFirstTimeCodActive;
+        if (valid && isPartialPay && partialPaymentMethod == 'digital_payment') {
+          valid = false;
+        }
+        break;
+      case 1: // Wallet
+        valid = isWalletActive && !isPartialPay;
+        break;
+      case 2: // Digital
+        valid = isDigitalPaymentActive && !isPartialPay
+            && _savedDigitalPaymentName != null
+            && _savedDigitalPaymentName!.isNotEmpty;
+        if (valid && isPartialPay && partialPaymentMethod == 'cod') {
+          valid = false;
+        }
+        if (valid) {
+          final activeList = Get.find<SplashController>()
+              .configModel
+              ?.activePaymentMethodList;
+          final stillActive = activeList != null
+              && activeList.any((g) => g.getWay == _savedDigitalPaymentName);
+          if (!stillActive) valid = false;
+        }
+        break;
+      case 3: // Offline
+        valid = isOfflinePaymentActive && !isPartialPay
+            && _savedOfflineBankIndex != null
+            && _offlineMethodList != null
+            && _savedOfflineBankIndex! >= 0
+            && _savedOfflineBankIndex! < _offlineMethodList!.length;
+        break;
+      default:
+        valid = false;
+    }
+
+    if (!valid) {
+      _paymentMethodIndex = -1;
+      _digitalPaymentName = null;
+      _paymentMethodConfirmed = false;
+      update();
+      return;
+    }
+
+    _paymentMethodIndex = _savedPaymentMethodIndex;
+    if (_savedPaymentMethodIndex == 2) {
+      _digitalPaymentName = _savedDigitalPaymentName;
+    } else if (_savedPaymentMethodIndex == 3) {
+      _selectedOfflineBankIndex = _savedOfflineBankIndex ?? 0;
+    }
+    // CRITICAL: auto-selection is NEVER considered confirmed.
+    _paymentMethodConfirmed = false;
+    update();
+  }
+
+  /// Persist the user's CURRENT live selection as the new saved preference.
+  /// Called whenever the user explicitly picks/changes a payment method.
+  Future<void> saveCurrentPaymentMethodAsPreference() async {
+    try {
+      if (_paymentMethodIndex == -1) return;
+      await checkoutServiceInterface.saveLastPaymentMethod(
+        identity: _paymentPrefIdentity(),
+        methodIndex: _paymentMethodIndex,
+        digitalPaymentName: _paymentMethodIndex == 2 ? _digitalPaymentName : null,
+        offlineBankIndex:
+            _paymentMethodIndex == 3 ? _selectedOfflineBankIndex : null,
+      );
+      _savedPaymentMethodIndex = _paymentMethodIndex;
+      _savedDigitalPaymentName =
+          _paymentMethodIndex == 2 ? _digitalPaymentName : null;
+      _savedOfflineBankIndex =
+          _paymentMethodIndex == 3 ? _selectedOfflineBankIndex : null;
+    } catch (_) {
+      // Non-fatal — the user can still complete the order.
+    }
+  }
+
+  /// Mark the CURRENT live selection as confirmed for the CURRENT order.
+  /// This is the ONLY way _paymentMethodConfirmed becomes true.
+  void confirmPaymentMethodForCurrentOrder() {
+    _paymentMethodConfirmed = true;
+    update();
+  }
+
+  /// Explicitly clear the confirmation (e.g. when async payment config
+  /// changes while the dialog is open).
+  void invalidatePaymentMethodConfirmation() {
+    if (_paymentMethodConfirmed) {
+      _paymentMethodConfirmed = false;
+      update();
+    }
+  }
+
+  /// Wipes the saved preference for the current identity. Used by logout
+  /// and account-deletion flows so the next account on the same device
+  /// does not inherit the previous user's choice.
+  Future<void> clearSavedPaymentMethod() async {
+    try {
+      await checkoutServiceInterface.clearLastPaymentMethod(
+        identity: _paymentPrefIdentity(),
+      );
+      _savedPaymentMethodIndex = -1;
+      _savedDigitalPaymentName = null;
+      _savedOfflineBankIndex = null;
+    } catch (_) {
+      // Non-fatal.
+    }
+  }
+
+  /// Convenience helper for the screen layer: true only if the user has
+  /// both selected AND explicitly confirmed a payment method. The
+  /// Place-Order flow must check this before submitting.
+  bool get isPaymentMethodReadyForSubmission =>
+      _paymentMethodIndex != -1 && _paymentMethodConfirmed;
 
   Future<void> initializeTimeSlot(Store store) async {
     _timeSlots = await checkoutServiceInterface.initializeTimeSlot(store, Get.find<SplashController>().configModel!.scheduleOrderSlotDuration!);

@@ -23,7 +23,6 @@ import 'package:pickles_and_pies/features/checkout/widgets/web_delivery_instruct
 
 import 'upload_prescription_widget.dart';
 
-
 class TopSection extends StatelessWidget {
   final CheckoutController checkoutController;
   final double charge;
@@ -122,6 +121,7 @@ class TopSection extends StatelessWidget {
                         (deliveryCharge == 0),
                 fromWeb: true, total: total,
                 deliveryChargeForView: deliveryChargeForView, badWeatherCharge: badWeatherCharge, extraChargeForToolTip: extraChargeForToolTip,
+                enabled: checkoutController.isDeliveryAvailable,
               ) : SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
                 Get.find<SplashController>().configModel!.homeDeliveryStatus == 1 && checkoutController.store!.delivery! ? DeliveryOptionButtonWidget(
                   value: 'delivery', title: 'home_delivery'.tr, charge: charge,
@@ -137,6 +137,7 @@ class TopSection extends StatelessWidget {
                           (deliveryCharge == 0),
                   fromWeb: true, total: total,
                   deliveryChargeForView: deliveryChargeForView, badWeatherCharge: badWeatherCharge, extraChargeForToolTip: extraChargeForToolTip,
+                  enabled: checkoutController.isDeliveryAvailable,
                 ) : const SizedBox(),
                 const SizedBox(width: Dimensions.paddingSizeDefault),
 
@@ -146,6 +147,31 @@ class TopSection extends StatelessWidget {
                 ) : const SizedBox(),
               ]),
               ),
+
+              // Delivery Service Hours label: shown only when delivery is
+              // currently disabled (either the day is inactive, or the
+              // current time falls outside the store's window).
+              if (!checkoutController.isDeliveryAvailable &&
+                  checkoutController.deliveryHoursOpeningLabel != null &&
+                  checkoutController.deliveryHoursClosingLabel != null)
+                Padding(
+                  padding: const EdgeInsets.only(
+                    top: Dimensions.paddingSizeSmall,
+                    left: Dimensions.paddingSizeExtraSmall,
+                  ),
+                  child: Text(
+                    checkoutController.isDeliveryDayActive
+                        ? 'delivery_available_from'.trArgs([
+                            checkoutController.deliveryHoursOpeningLabel!,
+                            checkoutController.deliveryHoursClosingLabel!,
+                          ])
+                        : 'delivery_unavailable_today'.tr,
+                    style: robotoRegular.copyWith(
+                      fontSize: Dimensions.fontSizeSmall,
+                      color: Theme.of(context).textTheme.bodyMedium!.color,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),

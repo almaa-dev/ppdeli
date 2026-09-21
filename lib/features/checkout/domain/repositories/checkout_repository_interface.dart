@@ -19,4 +19,22 @@ abstract class CheckoutRepositoryInterface extends RepositoryInterface {
   Future<Response> deleteSavedPrescriptionImages();
   Future<List<SavedPrescriptionModel>?> getSavedPrescriptionImages();
   Future<Response> storeSavedPrescriptionImages(List<MultipartBody> images);
+
+  // ===========================================================================
+  // Last Payment Method Preference (non-sensitive, identity-scoped)
+  // ===========================================================================
+  // Persists ONLY the method identifier (e.g. 'cash_on_delivery', 'wallet',
+  // 'stripe', 'paypal', offline bank index). NEVER card numbers / CVV / expiry.
+  // Storage key is suffixed with the current user/guest id by the
+  // implementation so different identities on the same device never see each
+  // other's preferred payment method.
+  // ===========================================================================
+  Future<bool> saveLastPaymentMethod({
+    required String identity,
+    required int methodIndex,
+    String? digitalPaymentName,
+    int? offlineBankIndex,
+  });
+  Map<String, dynamic>? getLastPaymentMethod({required String identity});
+  Future<bool> clearLastPaymentMethod({required String identity});
 }

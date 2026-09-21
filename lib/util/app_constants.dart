@@ -402,6 +402,12 @@ class AppConstants {
   ///service
   static const String lastIncompleteOfflineBookingId = 'last_incomplete_offline_booking_id';
 
+  /// Persisted preference for the user's last payment method selection.
+  /// Only the *method identifier* (COD / Wallet / Digital gateway / Offline bank)
+  /// is stored — never card numbers, CVV, expiry, or any sensitive credential.
+  /// The identity-suffixed variant prevents cross-user leakage on shared devices.
+  static const String lastPaymentPrefBaseKey = 'picklespies_last_payment_method';
+
 
   ///Refer & Earn work flow list..
   static final dataList = [

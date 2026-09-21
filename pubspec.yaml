@@ -1,7 +1,7 @@
 name: pickles_and_pies
-description: A pickkles andd pies service.
-publish_to: 'none' 
-version: 4.4.4+4
+description: A Multi-vendor Food. Grocery, eCommerce, Pharmacy & Parcel service.
+publish_to: 'none' #
+version: 5.5.5+5
 
 environment:
   sdk: ^3.11.0

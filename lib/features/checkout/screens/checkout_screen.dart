@@ -36,11 +36,11 @@ import 'package:pickles_and_pies/common/widgets/not_logged_in_screen.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/checkout_screen_shimmer_view.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/payment_method_bottom_sheet.dart';
 import 'package:get/get.dart';
+import 'package:pickles_and_pies/features/checkout/widgets/confirm_payment_method_dialog.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/bottom_section.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/top_section.dart';
 import 'package:flutter/material.dart';
-
-import 'package:pickles_and_pies/features/checkout/domain/helpers/delivery_fee_resolver.dart'; // استبدل المسار بالمسار الصحيح للملف
+import 'package:pickles_and_pies/features/checkout/domain/helpers/delivery_fee_resolver.dart';
 
 class CheckoutScreen extends StatefulWidget {
   final List<CartModel?>? cartList;
@@ -685,136 +685,292 @@ class CheckoutScreenState extends State<CheckoutScreen> {
           }else if (!checkoutController.acceptTerms) {
             showCustomSnackBar('please_accept_privacy_policy_trams_conditions_refund_policy_first'.tr);
           }
+          else if(checkoutController.paymentMethodIndex != -1 && !checkoutController.paymentMethodConfirmed){
+            // PAYMENT CONFIRMATION GATE
+            // ---------------------------------------------------------------
+            // The user has a payment method pre-selected (either manually or
+            // auto-restored from the last saved preference) but has NOT yet
+            // confirmed it for THIS specific order. We must NOT skip ahead
+            // and submit placeOrder() — the rules of this project require
+            // explicit confirmation for every new order.
+            //
+            // Any async configuration change that invalidates the selection
+            // would have already invalidated the confirmation through
+            // CheckoutController.invalidatePaymentMethodConfirmation().
+            // ---------------------------------------------------------------
+            _showPaymentConfirmationDialog(
+              onConfirm: _proceedWithPlaceOrder,
+              onChange: _reopenPaymentMethodSelector,
+            );
+          }
           else {
-
-            AddressModel? finalAddress = isGuestLogIn ? checkoutController.guestAddress : checkoutController.address;
-
-            if(isGuestLogIn && checkoutController.orderType == 'take_away') {
-              String number = checkoutController.countryDialCode! + guestContactPersonNumberController.text;
-              finalAddress = AddressModel(contactPersonName: guestContactPersonNameController.text, contactPersonNumber: number,
-                address: AddressHelper.getUserAddressFromSharedPref()!.address!, latitude: AddressHelper.getUserAddressFromSharedPref()!.latitude,
-                longitude: AddressHelper.getUserAddressFromSharedPref()!.longitude, zoneId: AddressHelper.getUserAddressFromSharedPref()!.zoneId,
-                email: guestEmailController.text,
-              );
-            } else if(isGuestLogIn && checkoutController.orderType != 'take_away') {
-              String number = checkoutController.countryDialCode! + guestContactPersonNumberController.text;
-              finalAddress = AddressModel(
-                contactPersonName: guestContactPersonNameController.text,
-                contactPersonNumber: number,
-                address: checkoutController.contactPersonAddressController.text,
-                latitude: checkoutController.guestAddress!.latitude,
-                longitude: checkoutController.guestAddress!.longitude,
-                zoneId: checkoutController.guestAddress!.zoneId,
-                email: guestEmailController.text,
-              );
-            }
-
-            if (kDebugMode) {
-              print('=====> checkout controller Address: ${checkoutController.address?.toJson()}');
-            }
-            if (kDebugMode) {
-              print('=====> Final Address: ${finalAddress?.toJson()}');
-            }
-            if(!isGuestLogIn && finalAddress!.contactPersonNumber == 'null'){
-              finalAddress.contactPersonNumber = Get.find<ProfileController>().userInfoModel!.phone;
-            }
-
-            if(AuthHelper.isLoggedIn()) {
-              finalAddress?.contactPersonName = checkoutController.contactPersonNameController.text;
-              finalAddress?.contactPersonNumber = checkoutController.countryDialCode! + checkoutController.contactPersonNumberController.text;
-              finalAddress?.streetNumber = checkoutController.streetNumberController.text;
-              finalAddress?.house = checkoutController.houseController.text;
-              finalAddress?.floor = checkoutController.floorController.text;
-            }
-
-            if(widget.storeId == null){
-
-              List<OnlineCart> carts = [];
-              for (int index = 0; index < _cartList!.length; index++) {
-                CartModel cart = _cartList![index]!;
-                List<int?> addOnIdList = [];
-                List<int?> addOnQtyList = [];
-                for (var addOn in cart.addOnIds!) {
-                  addOnIdList.add(addOn.id);
-                  addOnQtyList.add(addOn.quantity);
-                }
-
-                List<OrderVariation> variations = [];
-                if(Get.find<SplashController>().getModuleConfig(cart.item!.moduleType).newVariation!) {
-                  for(int i=0; i<cart.item!.foodVariations!.length; i++) {
-                    if(cart.foodVariations![i].contains(true)) {
-                      variations.add(OrderVariation(name: cart.item!.foodVariations![i].name, values: OrderVariationValue(label: [])));
-                      for(int j=0; j<cart.item!.foodVariations![i].variationValues!.length; j++) {
-                        if(cart.foodVariations![i][j]!) {
-                          variations[variations.length-1].values!.label!.add(cart.item!.foodVariations![i].variationValues![j].level);
-                        }
-                      }
-                    }
-                  }
-                }
-                carts.add(OnlineCart(
-                  cart.id, cart.item!.id, cart.isCampaign! ? cart.item!.id : null,
-                  cart.discountedPrice.toString(), '',
-                  Get.find<SplashController>().getModuleConfig(cart.item!.moduleType).newVariation! ? null : cart.variation,
-                  Get.find<SplashController>().getModuleConfig(cart.item!.moduleType).newVariation! ? variations : null,
-                  cart.quantity, addOnIdList, cart.addOns, addOnQtyList, 'Item', itemType: !widget.fromCart ? "AppModelsItemCampaign" : null,
-                  note: cart.note,
-                ));
-              }
-
-              PlaceOrderBodyModel placeOrderBody = PlaceOrderBodyModel(
-                cart: carts, couponDiscountAmount: Get.find<CouponController>().discount, distance: checkoutController.distance,
-                scheduleAt: !checkoutController.store!.scheduleOrder! ? null : (checkoutController.selectedDateSlot == 0
-                    && checkoutController.selectedTimeSlot == 0) ? null : DateConverter.dateToDateAndTime(scheduleEndDate),
-                orderAmount: total, orderNote: checkoutController.noteController.text, orderType: checkoutController.orderType,
-                paymentMethod: checkoutController.paymentMethodIndex == 0 ? 'cash_on_delivery'
-                    : checkoutController.paymentMethodIndex == 1 ? 'wallet'
-                    : checkoutController.paymentMethodIndex == 2 ? 'digital_payment' : 'offline_payment',
-                couponCode: (Get.find<CouponController>().discount! > 0 || (Get.find<CouponController>().coupon != null
-                    && Get.find<CouponController>().freeDelivery)) ? Get.find<CouponController>().coupon!.code : null,
-                storeId: _cartList![0]!.item!.storeId,
-                address: finalAddress!.address, latitude: finalAddress.latitude, longitude: finalAddress.longitude,
-                senderZoneId: null, addressType: finalAddress.addressType,
-                contactPersonName: finalAddress.contactPersonName ?? '${Get.find<ProfileController>().userInfoModel!.fName} '
-                    '${Get.find<ProfileController>().userInfoModel!.lName}',
-                contactPersonNumber: finalAddress.contactPersonNumber ?? Get.find<ProfileController>().userInfoModel!.phone,
-                streetNumber: isGuestLogIn ? finalAddress.streetNumber??'' : checkoutController.streetNumberController.text.trim(),
-                house: isGuestLogIn ? finalAddress.house ?? '' : checkoutController.houseController.text.trim(),
-                floor: isGuestLogIn ? finalAddress.floor ?? '' : checkoutController.floorController.text.trim(),
-                discountAmount: discount, taxAmount: tax, receiverDetails: null, parcelCategoryId: null,
-                chargePayer: null, dmTips: (checkoutController.orderType == 'take_away' || checkoutController.tipController.text == 'not_now') ? '' : checkoutController.tipController.text.trim(),
-                cutlery: Get.find<CartController>().addCutlery ? 1 : 0,
-                unavailableItemNote: Get.find<CartController>().notAvailableIndex != -1 ? Get.find<CartController>().notAvailableList[Get.find<CartController>().notAvailableIndex] : '',
-                deliveryInstruction: checkoutController.selectedInstruction != -1 ? AppConstants.deliveryInstructionList[checkoutController.selectedInstruction] : '',
-                partialPayment: checkoutController.isPartialPay ? 1 : 0, guestId: isGuestLogIn ? int.parse(AuthHelper.getGuestId()) : 0,
-                isBuyNow: widget.fromCart ? 0 : 1, guestEmail: isGuestLogIn ? finalAddress.email : null,
-                extraPackagingAmount: Get.find<CartController>().needExtraPackage ? checkoutController.store!.extraPackagingAmount : 0,
-                createNewUser: checkoutController.isCreateAccount ? 1 : 0, password: guestPasswordController.text,
-                bringChangeAmount: checkoutController.paymentMethodIndex == 0 && checkoutController.exchangeAmount > 0 ? checkoutController.exchangeAmount : null,
-              );
-
-              checkoutController.placeOrder(
-                placeOrderBody, checkoutController.store!.zoneId, total, maxCodOrderAmount, widget.fromCart,
-                _isCashOnDeliveryActive!, checkoutController.pickedPrescriptions, isOfflinePay: checkoutController.paymentMethodIndex == 3,
-              );
-            }else{
-              checkoutController.placePrescriptionOrder(storeId: widget.storeId,
-                zoneID: checkoutController.store!.zoneId, distance: checkoutController.distance,
-                address: finalAddress!.address!, longitude: finalAddress.longitude!,
-                latitude: finalAddress.latitude!, note: checkoutController.noteController.text,
-                orderAttachment: checkoutController.pickedPrescriptions,
-                savedImages: checkoutController.pickedPrescriptionSavedImageNames.whereType<String>().toList(),
-                dmTips: (checkoutController.orderType == 'take_away' || checkoutController.tipController.text == 'not_now')
-                    ? '' : checkoutController.tipController.text.trim(),
-                deliveryInstruction: checkoutController.selectedInstruction != -1
-                    ? AppConstants.deliveryInstructionList[checkoutController.selectedInstruction] : '',
-                orderAmount: 0, maxCodAmount: 0, fromCart: widget.fromCart, isCashOnDeliveryActive: _isCashOnDeliveryActive!,
-              );
-            }
+            _runOrderSubmission();
           }
         } : null),
       ),
     );
+  }
+
+  // ===========================================================================
+  // PAYMENT CONFIRMATION GATE — helpers
+  // ===========================================================================
+  // These helpers encapsulate the confirmation flow. They are intentionally
+  // kept small and side-effect-free so the main Place-Order branch above stays
+  // readable. The ONLY path that triggers the actual placeOrder() /
+  // placePrescriptionOrder() is through _proceedWithPlaceOrder(), which is
+  // only invoked from the dialog's Confirm callback (or after the user has
+  // already confirmed earlier in the same build).
+  // ===========================================================================
+
+  /// Performs the actual order submission. Extracted from the Place-Order
+  /// button so the confirmation dialog's Confirm callback can call it after
+  /// setting the confirmation flag. Mirrors the original inline code.
+  void _runOrderSubmission() {
+    CheckoutController checkoutController = Get.find<CheckoutController>();
+    bool isGuestLogIn = AuthHelper.isGuestLoggedIn();
+    double total = checkoutController.viewTotalPrice ?? 0.0;
+    double discount = 0;
+    double tax = checkoutController.orderTax ?? 0;
+    double? maxCodOrderAmount;
+    try {
+      maxCodOrderAmount = checkoutController.store?.minimumOrder;
+    } catch (_) {}
+
+    AddressModel? finalAddress =
+        isGuestLogIn ? checkoutController.guestAddress : checkoutController.address;
+
+    if (isGuestLogIn && checkoutController.orderType == 'take_away') {
+      String number = checkoutController.countryDialCode! + guestContactPersonNumberController.text;
+      finalAddress = AddressModel(
+        contactPersonName: guestContactPersonNameController.text,
+        contactPersonNumber: number,
+        address: AddressHelper.getUserAddressFromSharedPref()!.address!,
+        latitude: AddressHelper.getUserAddressFromSharedPref()!.latitude,
+        longitude: AddressHelper.getUserAddressFromSharedPref()!.longitude,
+        zoneId: AddressHelper.getUserAddressFromSharedPref()!.zoneId,
+        email: guestEmailController.text,
+      );
+    } else if (isGuestLogIn && checkoutController.orderType != 'take_away') {
+      String number = checkoutController.countryDialCode! + guestContactPersonNumberController.text;
+      finalAddress = AddressModel(
+        contactPersonName: guestContactPersonNameController.text,
+        contactPersonNumber: number,
+        address: checkoutController.contactPersonAddressController.text,
+        latitude: checkoutController.guestAddress!.latitude,
+        longitude: checkoutController.guestAddress!.longitude,
+        zoneId: checkoutController.guestAddress!.zoneId,
+        email: guestEmailController.text,
+      );
+    }
+
+    if (!isGuestLogIn && finalAddress!.contactPersonNumber == 'null') {
+      finalAddress.contactPersonNumber = Get.find<ProfileController>().userInfoModel!.phone;
+    }
+
+    if (AuthHelper.isLoggedIn()) {
+      finalAddress?.contactPersonName = checkoutController.contactPersonNameController.text;
+      finalAddress?.contactPersonNumber =
+          checkoutController.countryDialCode! + checkoutController.contactPersonNumberController.text;
+      finalAddress?.streetNumber = checkoutController.streetNumberController.text;
+      finalAddress?.house = checkoutController.houseController.text;
+      finalAddress?.floor = checkoutController.floorController.text;
+    }
+
+    if (widget.storeId == null) {
+      _submitNormalOrder(
+        checkoutController: checkoutController,
+        finalAddress: finalAddress,
+        total: total,
+        tax: tax,
+        discount: discount,
+        maxCodOrderAmount: maxCodOrderAmount,
+        isGuestLogIn: isGuestLogIn,
+      );
+    } else {
+      _submitPrescriptionOrder(
+        checkoutController: checkoutController,
+        finalAddress: finalAddress,
+        isGuestLogIn: isGuestLogIn,
+      );
+    }
+  }
+
+  /// Builds the cart payload and calls CheckoutController.placeOrder().
+  /// Identical to the original inline code.
+  void _submitNormalOrder({
+    required CheckoutController checkoutController,
+    required AddressModel? finalAddress,
+    required double total,
+    required double tax,
+    required double discount,
+    required double? maxCodOrderAmount,
+    required bool isGuestLogIn,
+  }) {
+    List<OnlineCart> carts = [];
+    for (int index = 0; index < _cartList!.length; index++) {
+      CartModel cart = _cartList![index]!;
+      List<int?> addOnIdList = [];
+      List<int?> addOnQtyList = [];
+      for (var addOn in cart.addOnIds!) {
+        addOnIdList.add(addOn.id);
+        addOnQtyList.add(addOn.quantity);
+      }
+
+      List<OrderVariation> variations = [];
+      if (Get.find<SplashController>().getModuleConfig(cart.item!.moduleType).newVariation!) {
+        for (int i = 0; i < cart.item!.foodVariations!.length; i++) {
+          if (cart.foodVariations![i].contains(true)) {
+            variations.add(OrderVariation(name: cart.item!.foodVariations![i].name, values: OrderVariationValue(label: [])));
+            for (int j = 0; j < cart.item!.foodVariations![i].variationValues!.length; j++) {
+              if (cart.foodVariations![i][j]!) {
+                variations[variations.length - 1].values!.label!.add(cart.item!.foodVariations![i].variationValues![j].level);
+              }
+            }
+          }
+        }
+      }
+
+      carts.add(OnlineCart(
+        cart.id, cart.item!.id, cart.isCampaign! ? cart.item!.id : null,
+        cart.discountedPrice.toString(), '',
+        Get.find<SplashController>().getModuleConfig(cart.item!.moduleType).newVariation! ? null : cart.variation,
+        Get.find<SplashController>().getModuleConfig(cart.item!.moduleType).newVariation! ? variations : null,
+        cart.quantity, addOnIdList, cart.addOns, addOnQtyList, 'Item',
+        itemType: !widget.fromCart ? "AppModelsItemCampaign" : null,
+        note: cart.note,
+      ));
+    }
+
+    PlaceOrderBodyModel placeOrderBody = PlaceOrderBodyModel(
+      cart: carts, couponDiscountAmount: Get.find<CouponController>().discount, distance: checkoutController.distance,
+      scheduleAt: !checkoutController.store!.scheduleOrder! ? null : null,
+      orderAmount: total, orderNote: checkoutController.noteController.text, orderType: checkoutController.orderType,
+      paymentMethod: checkoutController.paymentMethodIndex == 0 ? 'cash_on_delivery'
+          : checkoutController.paymentMethodIndex == 1 ? 'wallet'
+          : checkoutController.paymentMethodIndex == 2 ? 'digital_payment' : 'offline_payment',
+      couponCode: (Get.find<CouponController>().discount! > 0 || (Get.find<CouponController>().coupon != null
+          && Get.find<CouponController>().freeDelivery)) ? Get.find<CouponController>().coupon!.code : null,
+      storeId: _cartList![0]!.item!.storeId,
+      address: finalAddress!.address, latitude: finalAddress.latitude, longitude: finalAddress.longitude,
+      senderZoneId: null, addressType: finalAddress.addressType,
+      contactPersonName: finalAddress.contactPersonName ?? '${Get.find<ProfileController>().userInfoModel!.fName} '
+          '${Get.find<ProfileController>().userInfoModel!.lName}',
+      contactPersonNumber: finalAddress.contactPersonNumber ?? Get.find<ProfileController>().userInfoModel!.phone,
+      streetNumber: isGuestLogIn ? finalAddress.streetNumber ?? '' : checkoutController.streetNumberController.text.trim(),
+      house: isGuestLogIn ? finalAddress.house ?? '' : checkoutController.houseController.text.trim(),
+      floor: isGuestLogIn ? finalAddress.floor ?? '' : checkoutController.floorController.text.trim(),
+      discountAmount: discount, taxAmount: tax, receiverDetails: null, parcelCategoryId: null,
+      chargePayer: null, dmTips: (checkoutController.orderType == 'take_away' || checkoutController.tipController.text == 'not_now') ? '' : checkoutController.tipController.text.trim(),
+      cutlery: Get.find<CartController>().addCutlery ? 1 : 0,
+      unavailableItemNote: Get.find<CartController>().notAvailableIndex != -1 ? Get.find<CartController>().notAvailableList[Get.find<CartController>().notAvailableIndex] : '',
+      deliveryInstruction: checkoutController.selectedInstruction != -1 ? AppConstants.deliveryInstructionList[checkoutController.selectedInstruction] : '',
+      partialPayment: checkoutController.isPartialPay ? 1 : 0, guestId: isGuestLogIn ? int.parse(AuthHelper.getGuestId()) : 0,
+      isBuyNow: widget.fromCart ? 0 : 1, guestEmail: isGuestLogIn ? finalAddress.email : null,
+      extraPackagingAmount: Get.find<CartController>().needExtraPackage ? checkoutController.store!.extraPackagingAmount : 0,
+      createNewUser: checkoutController.isCreateAccount ? 1 : 0, password: guestPasswordController.text,
+      bringChangeAmount: checkoutController.paymentMethodIndex == 0 && checkoutController.exchangeAmount > 0 ? checkoutController.exchangeAmount : null,
+    );
+
+    checkoutController.placeOrder(
+      placeOrderBody, checkoutController.store!.zoneId, total, maxCodOrderAmount, widget.fromCart,
+      _isCashOnDeliveryActive!, checkoutController.pickedPrescriptions,
+      isOfflinePay: checkoutController.paymentMethodIndex == 3,
+    );
+  }
+
+  /// Calls CheckoutController.placePrescriptionOrder() — identical to the
+  /// original inline code.
+  void _submitPrescriptionOrder({
+    required CheckoutController checkoutController,
+    required AddressModel? finalAddress,
+    required bool isGuestLogIn,
+  }) {
+    checkoutController.placePrescriptionOrder(
+      storeId: widget.storeId,
+      zoneID: checkoutController.store!.zoneId, distance: checkoutController.distance,
+      address: finalAddress!.address!, longitude: finalAddress.longitude!,
+      latitude: finalAddress.latitude!, note: checkoutController.noteController.text,
+      orderAttachment: checkoutController.pickedPrescriptions,
+      savedImages: checkoutController.pickedPrescriptionSavedImageNames.whereType<String>().toList(),
+      dmTips: (checkoutController.orderType == 'take_away' || checkoutController.tipController.text == 'not_now')
+          ? '' : checkoutController.tipController.text.trim(),
+      deliveryInstruction: checkoutController.selectedInstruction != -1
+          ? AppConstants.deliveryInstructionList[checkoutController.selectedInstruction] : '',
+      orderAmount: 0, maxCodAmount: 0, fromCart: widget.fromCart, isCashOnDeliveryActive: _isCashOnDeliveryActive!,
+    );
+  }
+
+  /// Opens the confirmation dialog. Cancel / outside-tap / back button is
+  /// treated as "do nothing" — the order is NEVER submitted in those cases.
+  void _showPaymentConfirmationDialog({
+    required VoidCallback onConfirm,
+    required VoidCallback onChange,
+  }) {
+    Get.dialog(
+      ConfirmPaymentMethodDialog(
+        onConfirm: onConfirm,
+        onChange: onChange,
+      ),
+      barrierDismissible: true,
+    );
+  }
+
+  /// Called when the user taps "Change" inside the dialog. Re-opens the
+  /// existing selector without submitting the order. The newly chosen
+  /// method will again require explicit confirmation on the next Place-
+  /// Order tap (because setPaymentMethod/changeDigitalPaymentName
+  /// invalidate the confirmation flag).
+  void _reopenPaymentMethodSelector() {
+    if (_isCashOnDeliveryActive! || _isDigitalPaymentActive! || _isWalletActive || _isOfflinePaymentActive) {
+      if (ResponsiveHelper.isDesktop(Get.context)) {
+        Get.dialog(
+          Dialog(
+            backgroundColor: Colors.transparent,
+            child: PaymentMethodBottomSheet(
+              isCashOnDeliveryActive: _isCashOnDeliveryActive!,
+              isDigitalPaymentActive: _isDigitalPaymentActive!,
+              totalPrice: _totalForBottomSheet,
+              isOfflinePaymentActive: _isOfflinePaymentActive,
+            ),
+          ),
+        );
+      } else {
+        Get.bottomSheet(
+          PaymentMethodBottomSheet(
+            isCashOnDeliveryActive: _isCashOnDeliveryActive!,
+            isDigitalPaymentActive: _isDigitalPaymentActive!,
+            totalPrice: _totalForBottomSheet,
+            isOfflinePaymentActive: _isOfflinePaymentActive,
+          ),
+          backgroundColor: Colors.transparent,
+          isScrollControlled: true,
+          useRootNavigator: true,
+        );
+      }
+    } else {
+      showCustomSnackBar('no_payment_method_found'.tr);
+    }
+  }
+
+  /// Snapshot of the current total used by the bottom sheet helper.
+  double get _totalForBottomSheet {
+    try {
+      return Get.find<CheckoutController>().viewTotalPrice ?? 0.0;
+    } catch (_) {
+      return 0.0;
+    }
+  }
+
+  /// Called when the user taps "Confirm & Place Order" inside the dialog.
+  /// Sets the confirmation flag and immediately runs the submission pipeline.
+  void _proceedWithPlaceOrder() {
+    Get.find<CheckoutController>().confirmPaymentMethodForCurrentOrder();
+    _executeOrderSubmission();
+  }
+
+  /// Dispatch helper.
+  void _executeOrderSubmission() {
+    _runOrderSubmission();
   }
 
   List<DropdownItem<int>> _getDropdownAddressList({required BuildContext context, required List<AddressModel>? addressList, required Store? store}) {

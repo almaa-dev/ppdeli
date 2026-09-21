@@ -62,7 +62,9 @@ class PaymentSection extends StatelessWidget {
           ),
           const SizedBox(width: Dimensions.paddingSizeSmall),
 
-          Expanded(child: Text('cash_on_delivery'.tr,
+          Expanded(child: Text(checkoutController.orderType  == 'take_away'
+                            ? 'cash_on_pickup'.tr
+                            : 'cash_on_delivery'.tr,
             style: robotoMedium.copyWith(fontSize: Dimensions.fontSizeSmall, color: Theme.of(context).disabledColor),
           )),
 

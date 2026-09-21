@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:pickles_and_pies/common/models/response_model.dart';
 import 'package:pickles_and_pies/common/widgets/custom_snackbar.dart';
 import 'package:pickles_and_pies/features/cart/controllers/cart_controller.dart';
+import 'package:pickles_and_pies/features/checkout/controllers/checkout_controller.dart';
 import 'package:pickles_and_pies/features/home/controllers/home_controller.dart';
 import 'package:pickles_and_pies/features/profile/domain/models/update_user_model.dart';
 import 'package:pickles_and_pies/features/splash/controllers/splash_controller.dart';
@@ -183,6 +184,16 @@ class AuthController extends GetxController implements GetxService {
   Future<bool> clearSharedData({bool removeToken = true, bool createGuestSession = true}) async {
     if(!ResponsiveHelper.isDesktop(Get.context)){
       Get.find<SplashController>().setModule(null);
+    }
+        // Clear the per-user last-payment-method preference so the next account
+    // on this device does not inherit the previous user's choice. Non-fatal
+    // if the controller isn't registered yet.
+    try {
+      await Get.find<CheckoutController>().clearSavedPaymentMethod();
+    } catch (_) {
+      // CheckoutController may not be in scope yet during early startup;
+      // the preference will be cleared on the next account deletion /
+      // explicit logout flow.
     }
     return await authServiceInterface.clearSharedData(removeToken: removeToken, createGuestSession: createGuestSession);
   }

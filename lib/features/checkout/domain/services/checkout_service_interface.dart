@@ -24,4 +24,14 @@ abstract class CheckoutServiceInterface {
   Future<List<SavedPrescriptionModel>?> getSavedPrescriptionImages();
   Future<Response> storeSavedPrescriptionImages(List<MultipartBody> images);
   Future<Response> deleteSavedPrescriptionImages();
+
+  // ---- Last Payment Method Preference (non-sensitive) ----
+  Future<bool> saveLastPaymentMethod({
+    required String identity,
+    required int methodIndex,
+    String? digitalPaymentName,
+    int? offlineBankIndex,
+  });
+  Map<String, dynamic>? getLastPaymentMethod({required String identity});
+  Future<bool> clearLastPaymentMethod({required String identity});
 }

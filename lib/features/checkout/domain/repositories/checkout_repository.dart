@@ -190,4 +190,65 @@ class CheckoutRepository implements CheckoutRepositoryInterface {
     }
     return surgePrice;
   }
+
+  // ===========================================================================
+  // Last Payment Method Preference (identity-scoped, non-sensitive)
+  // ===========================================================================
+  /// Builds a stable SharedPreferences key that includes the identity suffix.
+  /// For logged-out users we use the guest id; for logged-in users we use the
+  /// user id. When neither is available we fall back to a global key, which
+  /// is acceptable only as a last resort (no real account associated).
+  String _resolvePaymentPrefKey(String identity) {
+    final safeIdentity = identity.trim().isEmpty ? 'anonymous' : identity.trim();
+    return '${AppConstants.lastPaymentPrefBaseKey}_$safeIdentity';
+  }
+
+  @override
+  Future<bool> saveLastPaymentMethod({
+    required String identity,
+    required int methodIndex,
+    String? digitalPaymentName,
+    int? offlineBankIndex,
+  }) async {
+    try {
+      final payload = jsonEncode({
+        'method_index': methodIndex,
+        // null-safe: serialise the absence of a digital gateway explicitly so
+        // a later read can distinguish "saved as null" from "never saved".
+        'digital_payment_name': digitalPaymentName,
+        'offline_bank_index': offlineBankIndex,
+        // schema version helps us discard older payloads safely if the shape
+        // ever changes.
+        'v': 1,
+      });
+      return await sharedPreferences.setString(_resolvePaymentPrefKey(identity), payload);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Map<String, dynamic>? getLastPaymentMethod({required String identity}) {
+    try {
+      final raw = sharedPreferences.getString(_resolvePaymentPrefKey(identity));
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      // Malformed payload (older schema, partial write, etc.) — treat as no
+      // saved preference. The caller will fall back to -1 and require the
+      // user to pick a method again.
+      return null;
+    }
+  }
+
+  @override
+  Future<bool> clearLastPaymentMethod({required String identity}) async {
+    try {
+      return await sharedPreferences.remove(_resolvePaymentPrefKey(identity));
+    } catch (_) {
+      return false;
+    }
+  }
 }

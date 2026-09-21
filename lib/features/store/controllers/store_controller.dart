@@ -918,6 +918,7 @@ class StoreController extends GetxController implements GetxService {
           result.store,
           fromCart: fromCart,
           slug: slug,
+          rawJson: result.rawJson,
         );
         if (fromModule) {
           HomeScreen.loadData(true);
@@ -972,6 +973,7 @@ class StoreController extends GetxController implements GetxService {
     Store store, {
     required bool fromCart,
     required String slug,
+    Map<String, dynamic>? rawJson,
   }) async {
     if (_controllerClosed) return;
     try {
@@ -1012,6 +1014,27 @@ class StoreController extends GetxController implements GetxService {
       }
     }
     _setOrderTypeFromStore();
+
+    // Pipe the raw store-details JSON into CheckoutController so the Delivery
+    // Service Hours feature can extract `delivery_service_hours` and
+    // `delivery_service` without issuing an additional network request.
+    // This path runs at most once per Checkout lifecycle thanks to the
+    // single-flight store-details cache and the deduplication guard inside
+    // CheckoutController.applyDeliveryHoursFromServer.
+    if (rawJson != null && store.id != null) {
+      try {
+        if (Get.isRegistered<CheckoutController>()) {
+          await Get.find<CheckoutController>().applyDeliveryHoursFromServer(
+            storeId: store.id!,
+            rawJson: rawJson,
+          );
+        }
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('[StoreCache] delivery-hours apply skipped: $error');
+        }
+      }
+    }
   }
 
   void _setOrderTypeFromStore() {

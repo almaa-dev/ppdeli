@@ -146,4 +146,30 @@ class CheckoutService implements CheckoutServiceInterface {
   Future<Response> deleteSavedPrescriptionImages() async {
     return await checkoutRepositoryInterface.deleteSavedPrescriptionImages();
   }
+
+  // ---- Last Payment Method Preference (non-sensitive passthrough) ----
+  @override
+  Future<bool> saveLastPaymentMethod({
+    required String identity,
+    required int methodIndex,
+    String? digitalPaymentName,
+    int? offlineBankIndex,
+  }) async {
+    return await checkoutRepositoryInterface.saveLastPaymentMethod(
+      identity: identity,
+      methodIndex: methodIndex,
+      digitalPaymentName: digitalPaymentName,
+      offlineBankIndex: offlineBankIndex,
+    );
+  }
+
+  @override
+  Map<String, dynamic>? getLastPaymentMethod({required String identity}) {
+    return checkoutRepositoryInterface.getLastPaymentMethod(identity: identity);
+  }
+
+  @override
+  Future<bool> clearLastPaymentMethod({required String identity}) async {
+    return await checkoutRepositoryInterface.clearLastPaymentMethod(identity: identity);
+  }
 }

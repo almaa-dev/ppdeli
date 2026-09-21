@@ -145,11 +145,16 @@ class _PaymentMethodBottomSheetState extends State<PaymentMethodBottomSheet> {
 
                     widget.isCashOnDeliveryActive && notHideCod ? paymentButtonView(
                       padding: EdgeInsets.only(bottom: Dimensions.paddingSizeDefault),
-                      title: 'cash_on_delivery'.tr,
+                      title: widget.paymentModel?.orderType  == 'take_away'
+                            ? 'cash_on_pickup'.tr
+                            : 'cash_on_delivery'.tr,
                       isSelected: checkoutController.paymentMethodIndex == 0,
                       disablePayments: disablePayments,
                       onTap: disablePayments ? null : (){
                         checkoutController.setPaymentMethod(0);
+                        // Persist the user's explicit COD choice so the next
+                        // checkout can pre-select it (still requires confirmation).
+                        checkoutController.saveCurrentPaymentMethodAsPreference();
                         if(!showChangeAmount) {
                           setState(() {
                             showChangeAmount = true;
@@ -187,6 +192,9 @@ class _PaymentMethodBottomSheetState extends State<PaymentMethodBottomSheet> {
                                 onTap: disablePayments ? null : () {
                                   checkoutController.setPaymentMethod(2);
                                   checkoutController.changeDigitalPaymentName(Get.find<SplashController>().configModel!.activePaymentMethodList![index].getWay!);
+                                  // Persist the new selection as the saved
+  // preference so the next checkout can restore it.
+                                  checkoutController.saveCurrentPaymentMethodAsPreference();
                                   if(showChangeAmount) {
                                     setState(() {
                                       showChangeAmount = false;
@@ -210,6 +218,9 @@ class _PaymentMethodBottomSheetState extends State<PaymentMethodBottomSheet> {
                       isOfflinePaymentActive: widget.isOfflinePaymentActive,
                       onTap: disablePayments ? null : () {
                         checkoutController.setPaymentMethod(3);
+                        // Persist the user's explicit Offline choice so the
+                        // next checkout can pre-select it.
+                        checkoutController.saveCurrentPaymentMethodAsPreference();
                         if(showChangeAmount) {
                           setState(() {
                             showChangeAmount = false;
@@ -285,7 +296,10 @@ class _PaymentMethodBottomSheetState extends State<PaymentMethodBottomSheet> {
                     color: checkoutController.paymentMethodIndex == 0 ? Theme.of(context).textTheme.bodyLarge!.color : Theme.of(context).disabledColor,
                   )),
 
-                  Text('specify_the_amount_of_change_the_deliveryman_needs_to_bring_when_delivering_the_order'.tr, style: robotoRegular.copyWith(color: Theme.of(context).disabledColor)),
+                  Text(widget.paymentModel?.orderType  == 'take_away'
+                            ? ' '
+                            : 'specify_the_amount_of_change_the_deliveryman_needs_to_bring_when_delivering_the_order'.tr,
+                     style: robotoRegular.copyWith(color: Theme.of(context).disabledColor)),
                   const SizedBox(height: Dimensions.paddingSizeExtraSmall),
 
                   CustomTextField(
@@ -415,6 +429,8 @@ class _PaymentMethodBottomSheetState extends State<PaymentMethodBottomSheet> {
                   checkoutController.changePartialPayment();
                 }
                 checkoutController.setPaymentMethod(1);
+                // Persist the user's explicit Wallet choice.
+                checkoutController.saveCurrentPaymentMethodAsPreference();
                 if(walletBalance < widget.totalPrice) {
                   checkoutController.changePartialPayment();
                 }
