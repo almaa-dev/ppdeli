@@ -296,10 +296,10 @@ class _PaymentMethodBottomSheetState extends State<PaymentMethodBottomSheet> {
                     color: checkoutController.paymentMethodIndex == 0 ? Theme.of(context).textTheme.bodyLarge!.color : Theme.of(context).disabledColor,
                   )),
 
-                  Text(widget.paymentModel?.orderType  == 'take_away'
-                            ? ' '
-                            : 'specify_the_amount_of_change_the_deliveryman_needs_to_bring_when_delivering_the_order'.tr,
-                     style: robotoRegular.copyWith(color: Theme.of(context).disabledColor)),
+                  // Text(widget.paymentModel?.orderType  == 'take_away'
+                  //           ? ' '
+                  //           : 'specify_the_amount_of_change_the_deliveryman_needs_to_bring_when_delivering_the_order'.tr,
+                  //    style: robotoRegular.copyWith(color: Theme.of(context).disabledColor)),
                   const SizedBox(height: Dimensions.paddingSizeExtraSmall),
 
                   CustomTextField(

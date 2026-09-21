@@ -1240,7 +1240,7 @@
   "pos": "Pos",
   "write_street_number": "Write Apartment number",
   "write_house_number": "Write State number",
-  "write_floor_number": "Write Floor number",
+  "write_floor_number": "Write ZIP number",
   "write_level_name": "Write level name",
   "write_delivery_address": "Write delivery address",
   "write_name": "Write name",
