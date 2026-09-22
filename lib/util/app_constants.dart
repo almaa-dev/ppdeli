@@ -4,7 +4,7 @@ import 'package:pickles_and_pies/features/language/domain/models/language_model.
 import 'package:pickles_and_pies/util/images.dart';
 
 class AppConstants {
-  static const String appName = 'Pickles and Pies Market';
+  static const String appName = 'Pickles and Pies';
   static const double appVersion = 3.9; ///Flutter sdk 3.41.8
 
   static const String fontFamily = 'Roboto';

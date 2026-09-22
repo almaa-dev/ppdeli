@@ -30,7 +30,7 @@
     </queries>
 
     <application
-        android:label="Pickles and Pies Market"
+        android:label="Pickles and Pies"
         android:name="${applicationName}"
         android:extractNativeLibs="true"
         android:usesCleartextTraffic="false"
