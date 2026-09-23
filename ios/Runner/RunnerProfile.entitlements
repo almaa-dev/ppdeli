@@ -10,7 +10,7 @@
 	</array>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>food.ppdeli.com</string>
+		<string>admin.ppdeli.com</string>
 	</array>
 </dict>
 </plist>

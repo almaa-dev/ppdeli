@@ -107,7 +107,8 @@ class OrderDetailsScreenState extends State<OrderDetailsScreen> {
               const SizedBox(height: Dimensions.paddingSizeExtraSmall),
 
               Text(
-                '${'your_order_is'.tr} ${orderController.trackModel?.orderStatus?.tr ?? (widget.orderModel?.orderStatus?.tr ?? '')}',
+                '${'your_order_is'.tr} ${(orderController.trackModel?.orderStatus == 'delivered' && widget.orderModel?.orderType == 'take_away') ? 'pickup'.tr : (orderController.trackModel?.orderStatus?.tr ?? widget.orderModel?.orderStatus?.tr ?? '')}',
+                // '${'your_order_is'.tr} ${orderController.trackModel?.orderStatus?.tr ?? (widget.orderModel?.orderStatus?.tr ?? '')}',
                 style: robotoRegular.copyWith(
                   fontSize: Dimensions.fontSizeSmall, color: Theme.of(context).textTheme.bodyLarge!.color!.withValues(alpha: 0.6),
                 ),
