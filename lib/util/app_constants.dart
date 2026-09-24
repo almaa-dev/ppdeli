@@ -414,6 +414,13 @@ class AppConstants {
   static const String streetHistoryList = 'picklespies_street_history_list';
   static const String floorHistoryList = 'picklespies_floor_history_list';
 
+  ///Persisted "last used" apartment number (street_number) value.
+  ///The value is automatically pre-filled into every address form's
+  ///Apartment Number field on first open, and the user is free to
+  ///edit it at any time. The new value replaces this stored one as
+  ///soon as the field loses focus or the form is saved/submitted.
+  static const String apartmentNumberLastUsed = 'picklespies_apartment_number_last_used';
+  
   ///Refer & Earn work flow list..
   static final dataList = [
     'invite_your_friends_and_business'.tr,

@@ -6,6 +6,7 @@ import 'package:pickles_and_pies/features/profile/controllers/profile_controller
 import 'package:pickles_and_pies/features/address/domain/models/address_model.dart';
 import 'package:pickles_and_pies/features/parcel/controllers/parcel_controller.dart';
 import 'package:pickles_and_pies/features/parcel/domain/models/parcel_category_model.dart';
+import 'package:pickles_and_pies/helper/address_fields_history_helper.dart';
 import 'package:pickles_and_pies/helper/responsive_helper.dart';
 import 'package:pickles_and_pies/helper/route_helper.dart';
 import 'package:pickles_and_pies/util/dimensions.dart';
@@ -36,20 +37,41 @@ class _ReceiverDetailsBottomSheetWidgetState extends State<ReceiverDetailsBottom
   @override
   void initState() {
     super.initState();
+    // Use the persisted apartment number when the destination address
+    // did not store one of its own. The user can still change it.
+    final String? existingStreet =
+        Get.find<ParcelController>().destinationAddress?.streetNumber;
+    _streetNumberController.text =
+        (existingStreet != null && existingStreet.trim().isNotEmpty)
+            ? existingStreet
+            : (AddressFieldsHistoryHelper.getApartmentNumber() ?? '');
+    final String? existingHouse =
+        Get.find<ParcelController>().destinationAddress?.house;
+    _houseController.text = existingHouse ?? '';
+    final String? existingFloor =
+        Get.find<ParcelController>().destinationAddress?.floor;
+    _floorController.text = existingFloor ?? '';
 
-    _streetNumberController.text = Get.find<ParcelController>().destinationAddress!.streetNumber!;
-    _houseController.text = Get.find<ParcelController>().destinationAddress!.house!;
-    _floorController.text = Get.find<ParcelController>().destinationAddress!.floor!;
+    // Persist any change to the apartment-number field on focus loss so
+    // the value is available as the next "last used" value.
+    _streetNode.addListener(_handleStreetFocusChange);
   }
 
   @override
   void dispose() {
-    super.dispose();
+    _streetNode.removeListener(_handleStreetFocusChange);
     _streetNumberController.dispose();
     _houseController.dispose();
     _floorController.dispose();
-  }
+    super.dispose();
+ }
 
+  /// When the apartment-number field loses focus, persist the current
+  /// value as the "last used" apartment number.
+  void _handleStreetFocusChange() {
+    if (!_streetNode.hasFocus) {
+      AddressFieldsHistoryHelper.saveApartmentNumber(_streetNumberController.text);
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -128,6 +150,15 @@ class _ReceiverDetailsBottomSheetWidgetState extends State<ReceiverDetailsBottom
               String streetNumber = _streetNumberController.text.trim();
               String house = _houseController.text.trim();
               String floor = _floorController.text.trim();
+
+              // Persist the entered sub-address values so the next time
+              // any address form is opened (parcel, checkout, add address)
+              // the apartment number can be pre-filled automatically.
+              AddressFieldsHistoryHelper.saveAddressDetailHistory(
+                house: house,
+                street: streetNumber,
+                floor: floor,
+              );
 
               // String _additional = _additionalController.text.trim();
               if(name.isEmpty) {

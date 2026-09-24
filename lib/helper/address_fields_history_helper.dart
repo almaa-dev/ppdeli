@@ -50,8 +50,55 @@ class AddressFieldsHistoryHelper {
       _readValue(AppConstants.floorHistoryList);
 
   // ---------------------------------------------------------------------------
+  //  "Last used" apartment number (street_number)
+  //
+  //  Stored as a single string so every address form on the device can
+  //  pre-fill it automatically. The user is free to change the value
+  //  at any time; the new value simply replaces the stored one.
+  // ---------------------------------------------------------------------------
+
+  /// Persists `value` as the "last used" apartment number so the next
+  /// opened address form can pre-fill it.
+  ///
+  /// Empty / whitespace-only values are ignored so we never overwrite
+  /// the previously saved value with an empty one when the user clears
+  /// the field temporarily.
+  static Future<void> saveApartmentNumber(String value) async {
+    final String trimmed = value.trim();
+    if (trimmed.isEmpty) return;
+    try {
+      final SharedPreferences prefs = Get.find<SharedPreferences>();
+      await prefs.setString(AppConstants.apartmentNumberLastUsed, trimmed);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('AddressFieldsHistoryHelper saveApartmentNumber failed: $e');
+      }
+    }
+  }
+
+  /// Returns the last-used apartment number, or `null` if none has ever
+  /// been saved (e.g. fresh install).
+  static String? getApartmentNumber() {
+    try {
+      final SharedPreferences prefs = Get.find<SharedPreferences>();
+      final String? raw = prefs.getString(AppConstants.apartmentNumberLastUsed);
+      if (raw == null) return null;
+      final String trimmed = raw.trim();
+      return trimmed.isEmpty ? null : trimmed;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('AddressFieldsHistoryHelper getApartmentNumber failed: $e');
+      }
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   //  Convenience wrappers that save all three fields in a single call. Use
   //  these from screens that want to record every field after a save/update.
+  //
+  //  When [street] is non-null it is also persisted as the "last used"
+  //  apartment number so subsequent forms pre-fill it automatically.
   // ---------------------------------------------------------------------------
   static Future<void> saveAddressDetailHistory({
     String? house,
@@ -61,14 +108,17 @@ class AddressFieldsHistoryHelper {
     if (house != null) await saveHouseToHistory(house);
     if (street != null) await saveStreetToHistory(street);
     if (floor != null) await saveFloorToHistory(floor);
+    if (street != null) await saveApartmentNumber(street);
   }
 
-  /// Clears the cached history for all three fields.
+  /// Clears the cached history for all three fields AND the
+  /// stored "last used" apartment number.
   static Future<void> clearAll() async {
     final SharedPreferences prefs = Get.find<SharedPreferences>();
     await prefs.remove(AppConstants.houseHistoryList);
     await prefs.remove(AppConstants.streetHistoryList);
     await prefs.remove(AppConstants.floorHistoryList);
+    await prefs.remove(AppConstants.apartmentNumberLastUsed);
   }
 
   // ---------------------------------------------------------------------------

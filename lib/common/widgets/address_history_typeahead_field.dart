@@ -15,6 +15,15 @@ import 'package:pickles_and_pies/util/styles.dart';
 /// per-field list in `SharedPreferences`. Tapping a suggestion fills
 /// the controller; typing a new value and committing saves it for
 /// the next time the field is rendered.
+///
+/// When [prefillFromApartmentHistory] is true AND [fieldType] is
+/// [HistoryFieldType.street], the field will:
+///   * on first build: read the previously saved apartment number
+///     from `SharedPreferences` and seed the controller with it
+///     (only if the controller is currently empty), and
+///   * on focus loss / editing complete / submit: persist the
+///     current value as the "last used" apartment number so the
+///     next opened form can pre-fill it again.
 class AddressHistoryTypeAheadField extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode? focusNode;
@@ -30,6 +39,12 @@ class AddressHistoryTypeAheadField extends StatefulWidget {
   final ValueChanged<String>? onSubmitted;
   final HistoryFieldType fieldType;
   final Function(String value)? onSaveHistory;
+
+  /// When true (and [fieldType] is [HistoryFieldType.street]) the field
+  /// is pre-filled with the last-used apartment number on first build,
+  /// and the current value is written back as the "last used" apartment
+  /// number whenever the field loses focus or the form commits.
+  final bool prefillFromApartmentHistory;
 
   const AddressHistoryTypeAheadField({
     super.key,
@@ -47,6 +62,7 @@ class AddressHistoryTypeAheadField extends StatefulWidget {
     this.onChanged,
     this.onSubmitted,
     this.onSaveHistory,
+    this.prefillFromApartmentHistory = true,
   });
 
   @override
@@ -59,6 +75,7 @@ enum HistoryFieldType { house, street, floor }
 class _AddressHistoryTypeAheadFieldState
     extends State<AddressHistoryTypeAheadField> {
   FocusNode? _internalFocus;
+  bool _prefilledFromHistory = false;
 
   FocusNode get _focusNode {
     if (widget.focusNode != null) return widget.focusNode!;
@@ -73,6 +90,7 @@ class _AddressHistoryTypeAheadFieldState
       _internalFocus = FocusNode();
     }
     _focusNode.addListener(_handleFocusChange);
+    _maybePrefillApartmentNumber();
   }
 
   @override
@@ -117,12 +135,40 @@ class _AddressHistoryTypeAheadFieldState
         break;
       case HistoryFieldType.street:
         AddressFieldsHistoryHelper.saveStreetToHistory(trimmed);
+        // Persist as the "last used" apartment number so every
+        // future address form can pre-fill it for the user.
+        if (widget.prefillFromApartmentHistory) {
+          AddressFieldsHistoryHelper.saveApartmentNumber(trimmed);
+        }
         break;
       case HistoryFieldType.floor:
         AddressFieldsHistoryHelper.saveFloorToHistory(trimmed);
         break;
     }
     widget.onSaveHistory?.call(trimmed);
+  }
+
+  /// Seeds the controller with the previously stored "last used"
+  /// apartment number when:
+  ///   * the widget is bound to a street-number field, and
+  ///   * [prefillFromApartmentHistory] is true (default), and
+  ///   * the controller is currently empty (we never overwrite a value
+  ///     that the user or caller has already set, e.g. when editing an
+  ///     existing address).
+  void _maybePrefillApartmentNumber() {
+    if (_prefilledFromHistory) return;
+    if (!widget.prefillFromApartmentHistory) return;
+    if (widget.fieldType != HistoryFieldType.street) return;
+    if (widget.controller.text.trim().isNotEmpty) return;
+
+    final String? saved = AddressFieldsHistoryHelper.getApartmentNumber();
+    if (saved == null || saved.isEmpty) return;
+
+    widget.controller.text = saved;
+    widget.controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: saved.length),
+    );
+    _prefilledFromHistory = true;
   }
 
   @override

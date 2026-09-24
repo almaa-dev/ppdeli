@@ -75,6 +75,7 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
   void initState() {
     super.initState();
     initCall();
+    _streetNode.addListener(_handleStreetFocusChange);
 
     if(widget.address != null) {
       splitPhoneNumber(widget.address!.contactPersonNumber!);
@@ -84,10 +85,17 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
       _houseController.text = widget.address!.house ?? '';
       _floorController.text = widget.address!.floor ?? '';
 
-    }else if(Get.find<ProfileController>().userInfoModel != null && _contactPersonNameController.text.isEmpty) {
-      _contactPersonNameController.text = '${Get.find<ProfileController>().userInfoModel!.fName} ${Get.find<ProfileController>().userInfoModel!.lName}';
-      splitPhoneNumber(Get.find<ProfileController>().userInfoModel!.phone!);
-    }
+     }else {
+      // No address is being edited -> pre-fill the apartment number
+      // (street_number) from the last value the user entered on any
+      // previous order/address form. The user can still change it.
+      _streetNumberController.text =
+          AddressFieldsHistoryHelper.getApartmentNumber() ?? '';
+
+      if(Get.find<ProfileController>().userInfoModel != null && _contactPersonNameController.text.isEmpty) {
+        _contactPersonNameController.text = '${Get.find<ProfileController>().userInfoModel!.fName} ${Get.find<ProfileController>().userInfoModel!.lName}';
+        splitPhoneNumber(Get.find<ProfileController>().userInfoModel!.phone!);
+      }
 
   }
 
@@ -123,8 +131,17 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
 
   @override
   void dispose() {
+    _streetNode.removeListener(_handleStreetFocusChange);
     _idleDebouncer.dispose();
     super.dispose();
+  }
+
+  /// Persists the current apartment-number value to SharedPreferences
+  /// when the field loses focus, so the next form open can pre-fill it.
+  void _handleStreetFocusChange() {
+    if (!_streetNode.hasFocus) {
+      AddressFieldsHistoryHelper.saveApartmentNumber(_streetNumberController.text);
+    }
   }
 
   void splitPhoneNumber(String number) async {

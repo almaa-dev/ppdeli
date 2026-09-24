@@ -6,6 +6,7 @@ import 'package:pickles_and_pies/features/address/domain/models/address_model.da
 import 'package:pickles_and_pies/features/location/screens/pick_map_screen.dart';
 import 'package:pickles_and_pies/features/location/widgets/serach_location_widget.dart';
 import 'package:pickles_and_pies/features/parcel/controllers/parcel_controller.dart';
+import 'package:pickles_and_pies/helper/address_fields_history_helper.dart';
 import 'package:pickles_and_pies/helper/address_helper.dart';
 import 'package:pickles_and_pies/helper/auth_helper.dart';
 import 'package:pickles_and_pies/helper/responsive_helper.dart';
@@ -41,6 +42,14 @@ class _ReceiverViewWidgetState extends State<ReceiverViewWidget> {
   void initState() {
     super.initState();
 
+    // Pre-fill the apartment-number field with the previously saved
+    // value so the user does not have to retype it on every parcel.
+    _streetNumberController.text =
+        AddressFieldsHistoryHelper.getApartmentNumber() ?? '';
+
+    // Persist the apartment number whenever the field loses focus.
+    _streetNode.addListener(_handleStreetFocusChange);
+
     Get.find<ParcelController>().setPickupAddress(AddressHelper.getUserAddressFromSharedPref(), false);
     Get.find<ParcelController>().setIsPickedUp(false, false);
     if(AuthHelper.isLoggedIn() && Get.find<AddressController>().addressList == null) {
@@ -53,11 +62,20 @@ class _ReceiverViewWidgetState extends State<ReceiverViewWidget> {
 
   @override
   void dispose() {
-    super.dispose();
+    _streetNode.removeListener(_handleStreetFocusChange);
     _streetNumberController.dispose();
     _houseController.dispose();
     _floorController.dispose();
+    super.dispose();
   }
+  
+  /// Persists the current apartment-number value to SharedPreferences
+  /// whenever the field loses focus.
+  void _handleStreetFocusChange() {
+    if (!_streetNode.hasFocus) {
+      AddressFieldsHistoryHelper.saveApartmentNumber(_streetNumberController.text);
+    }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
