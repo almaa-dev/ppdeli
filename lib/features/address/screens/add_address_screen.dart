@@ -12,6 +12,7 @@ import 'package:pickles_and_pies/features/address/domain/models/address_model.da
 import 'package:pickles_and_pies/features/auth/controllers/auth_controller.dart';
 import 'package:pickles_and_pies/features/location/widgets/permission_dialog_widget.dart';
 import 'package:pickles_and_pies/helper/auth_helper.dart';
+import 'package:pickles_and_pies/helper/address_fields_history_helper.dart';
 import 'package:pickles_and_pies/helper/custom_validator.dart';
 import 'package:pickles_and_pies/helper/debouncer.dart';
 import 'package:pickles_and_pies/helper/responsive_helper.dart';
@@ -24,6 +25,7 @@ import 'package:pickles_and_pies/common/widgets/custom_app_bar.dart';
 import 'package:pickles_and_pies/common/widgets/custom_button.dart';
 import 'package:pickles_and_pies/common/widgets/custom_snackbar.dart';
 import 'package:pickles_and_pies/common/widgets/custom_text_field.dart';
+import 'package:pickles_and_pies/common/widgets/address_history_typeahead_field.dart';
 import 'package:pickles_and_pies/common/widgets/footer_view.dart';
 import 'package:pickles_and_pies/common/widgets/menu_drawer.dart';
 import 'package:pickles_and_pies/features/location/screens/pick_map_screen.dart';
@@ -705,37 +707,41 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
                   ) : const SizedBox(),
                   SizedBox(height: widget.forGuest ? Dimensions.paddingSizeExtremeLarge : 0),
 
-                  CustomTextField(
+                 
+                  AddressHistoryTypeAheadField(
+                    controller: _streetNumberController,
+                    focusNode: _streetNode,
+                    nextFocus: _houseNode,
                     labelText: '${'street_number'.tr} (${'optional'.tr})',
                     titleText: 'write_street_number'.tr,
                     inputType: TextInputType.streetAddress,
-                    focusNode: _streetNode,
-                    nextFocus: _houseNode,
-                    controller: _streetNumberController,
+                    fieldType: HistoryFieldType.street,
                   ),
                   const SizedBox(height: Dimensions.paddingSizeExtremeLarge),
 
                   Row(children: [
                     Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: _houseController,
+                        focusNode: _houseNode,
+                        nextFocus: _floorNode,
                         labelText: '${'house'.tr} (${'optional'.tr})',
                         titleText: 'write_house_number'.tr,
                         inputType: TextInputType.text,
-                        focusNode: _houseNode,
-                        nextFocus: _floorNode,
-                        controller: _houseController,
+                        fieldType: HistoryFieldType.house,
                       ),
                     ),
                     const SizedBox(width: Dimensions.paddingSizeExtremeLarge),
 
                     Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: _floorController,
+                        focusNode: _floorNode,
+                        inputAction: TextInputAction.done,
                         labelText: "${'floor'.tr} (${'optional'.tr})",
                         titleText: 'write_floor_number'.tr,
                         inputType: TextInputType.text,
-                        focusNode: _floorNode,
-                        inputAction: TextInputAction.done,
-                        controller: _floorController,
+                        fieldType: HistoryFieldType.floor,
                       ),
                     ),
                   ]),
@@ -795,6 +801,13 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
     if(addressModel == null) {
       return;
     }
+    // Persist the entered values so the next time the user opens this form
+    // they can pick them back from the type-ahead suggestion dropdown.
+    await AddressFieldsHistoryHelper.saveAddressDetailHistory(
+      house: _houseController.text,
+      street: _streetNumberController.text,
+      floor: _floorController.text,
+    );
 
     if(widget.forGuest) {
       addressModel.email = _emailController.text;

@@ -408,6 +408,11 @@ class AppConstants {
   /// The identity-suffixed variant prevents cross-user leakage on shared devices.
   static const String lastPaymentPrefBaseKey = 'picklespies_last_payment_method';
 
+  ///Persisted local history for the house/street/floor TypeAhead fields.
+  ///These are keyed locally on the device to power the address-field autocomplete.
+  static const String houseHistoryList = 'picklespies_house_history_list';
+  static const String streetHistoryList = 'picklespies_street_history_list';
+  static const String floorHistoryList = 'picklespies_floor_history_list';
 
   ///Refer & Earn work flow list..
   static final dataList = [

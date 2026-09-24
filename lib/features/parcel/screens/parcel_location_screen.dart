@@ -13,6 +13,7 @@ import 'package:pickles_and_pies/features/parcel/controllers/parcel_controller.d
 import 'package:pickles_and_pies/features/parcel/domain/models/parcel_category_model.dart';
 import 'package:pickles_and_pies/features/auth/controllers/auth_controller.dart';
 import 'package:pickles_and_pies/helper/address_helper.dart';
+import 'package:pickles_and_pies/helper/address_fields_history_helper.dart';
 import 'package:pickles_and_pies/helper/auth_helper.dart';
 import 'package:pickles_and_pies/helper/custom_validator.dart';
 import 'package:pickles_and_pies/helper/responsive_helper.dart';
@@ -249,6 +250,21 @@ class _ParcelLocationScreenState extends State<ParcelLocationScreen> with Ticker
         width: ResponsiveHelper.isDesktop(context) ? 200 : double.infinity,
         buttonText: parcelController.isSender ? 'continue'.tr : 'save_and_continue'.tr,
         onPressed: () async {
+          // Persist the entered sub-address values so the next time the parcel
+          // form is opened the type-ahead can offer them back as suggestions.
+          await AddressFieldsHistoryHelper.saveAddressDetailHistory(
+            house: parcelController.isSender
+                ? _senderHouseController.text
+                : _receiverHouseController.text,
+            street: parcelController.isSender
+                ? _senderStreetNumberController.text
+                : _receiverStreetNumberController.text,
+            floor: parcelController.isSender
+                ? _senderFloorController.text
+                : _receiverFloorController.text,
+          );
+
+          if (!mounted) return;
           if( (ResponsiveHelper.isDesktop(context) ? selectedIndex == 0 : _tabController!.index == 0)) {
             _validateSender(parcelController);
           } else{

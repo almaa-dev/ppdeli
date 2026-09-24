@@ -19,6 +19,7 @@ import 'package:pickles_and_pies/util/dimensions.dart';
 import 'package:pickles_and_pies/util/styles.dart';
 import 'package:pickles_and_pies/common/widgets/custom_dropdown.dart';
 import 'package:pickles_and_pies/common/widgets/custom_text_field.dart';
+import 'package:pickles_and_pies/common/widgets/address_history_typeahead_field.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/guest_delivery_address.dart';
 
 class DeliverySection extends StatefulWidget {
@@ -342,37 +343,40 @@ class _DeliverySectionState extends State<DeliverySection> {
               Row(
                   children: [
                     isDesktop ? Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: widget.checkoutController.streetNumberController,
+                        focusNode: widget.checkoutController.streetNode,
+                        nextFocus: widget.checkoutController.houseNode,
                         titleText: 'write_street_number'.tr,
                         labelText: 'street_number'.tr,
                         inputType: TextInputType.streetAddress,
-                        focusNode: widget.checkoutController.streetNode,
-                        nextFocus: widget.checkoutController.houseNode,
-                        controller: widget.checkoutController.streetNumberController,
+                        fieldType: HistoryFieldType.street,
                       ),
                     ) : const SizedBox(),
                     SizedBox(width: isDesktop ? Dimensions.paddingSizeSmall : 0),
 
                     Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: widget.checkoutController.houseController,
+                        focusNode: widget.checkoutController.houseNode,
+                        nextFocus: widget.checkoutController.floorNode,
                         titleText: 'write_house_number'.tr,
                         labelText: 'house'.tr,
                         inputType: TextInputType.text,
-                        focusNode: widget.checkoutController.houseNode,
-                        nextFocus: widget.checkoutController.floorNode,
-                        controller: widget.checkoutController.houseController,
+                        fieldType: HistoryFieldType.house,
                       ),
                     ),
                     const SizedBox(width: Dimensions.paddingSizeSmall),
 
                     Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: widget.checkoutController.floorController,
+                        focusNode: widget.checkoutController.floorNode,
+                        inputAction: TextInputAction.done,
                         titleText: 'write_floor_number'.tr,
                         labelText: 'floor'.tr,
                         inputType: TextInputType.text,
-                        focusNode: widget.checkoutController.floorNode,
-                        inputAction: TextInputAction.done,
-                        controller: widget.checkoutController.floorController,
+                        fieldType: HistoryFieldType.floor,
                       ),
                     ),
 

@@ -17,6 +17,7 @@ import 'package:pickles_and_pies/features/checkout/controllers/checkout_controll
 import 'package:pickles_and_pies/features/store/domain/models/store_model.dart';
 import 'package:pickles_and_pies/helper/address_helper.dart';
 import 'package:pickles_and_pies/helper/auth_helper.dart';
+import 'package:pickles_and_pies/helper/address_fields_history_helper.dart';
 import 'package:pickles_and_pies/helper/custom_validator.dart';
 import 'package:pickles_and_pies/helper/date_converter.dart';
 import 'package:pickles_and_pies/helper/price_converter.dart';
@@ -797,7 +798,7 @@ class CheckoutScreenState extends State<CheckoutScreen> {
 
   /// Builds the cart payload and calls CheckoutController.placeOrder().
   /// Identical to the original inline code.
-  void _submitNormalOrder({
+ Future<void> _submitNormalOrder({
     required CheckoutController checkoutController,
     required AddressModel? finalAddress,
     required double total,
@@ -805,7 +806,7 @@ class CheckoutScreenState extends State<CheckoutScreen> {
     required double discount,
     required double? maxCodOrderAmount,
     required bool isGuestLogIn,
-  }) {
+  }) async {
     List<OnlineCart> carts = [];
     for (int index = 0; index < _cartList!.length; index++) {
       CartModel cart = _cartList![index]!;
@@ -869,6 +870,14 @@ class CheckoutScreenState extends State<CheckoutScreen> {
       extraPackagingAmount: Get.find<CartController>().needExtraPackage ? checkoutController.store!.extraPackagingAmount : 0,
       createNewUser: checkoutController.isCreateAccount ? 1 : 0, password: guestPasswordController.text,
       bringChangeAmount: checkoutController.paymentMethodIndex == 0 && checkoutController.exchangeAmount > 0 ? checkoutController.exchangeAmount : null,
+    );
+
+    // Persist the entered sub-address values so the next time the user opens
+    // the address sub-fields they get the previous entries as suggestions.
+    await AddressFieldsHistoryHelper.saveAddressDetailHistory(
+      house: checkoutController.houseController.text,
+      street: checkoutController.streetNumberController.text,
+      floor: checkoutController.floorController.text,
     );
 
     checkoutController.placeOrder(

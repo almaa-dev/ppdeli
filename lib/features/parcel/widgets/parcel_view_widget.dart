@@ -21,6 +21,7 @@ import 'package:pickles_and_pies/util/dimensions.dart';
 import 'package:pickles_and_pies/util/images.dart';
 import 'package:pickles_and_pies/util/styles.dart';
 import 'package:pickles_and_pies/common/widgets/custom_text_field.dart';
+import 'package:pickles_and_pies/common/widgets/address_history_typeahead_field.dart';
 import 'package:pickles_and_pies/features/location/screens/pick_map_screen.dart';
 
 class ParcelViewWidget extends StatefulWidget {
@@ -352,50 +353,54 @@ class _ParcelViewWidgetState extends State<ParcelViewWidget> {
                 ),
                 const SizedBox(height: Dimensions.paddingSizeLarge),
 
-                !isDesktop ? CustomTextField(
+                !isDesktop ? AddressHistoryTypeAheadField(
+                  controller: widget.streetController,
+                  focusNode: streetNode,
+                  nextFocus: houseNode,
                   titleText: 'street_number'.tr,
                   labelText: 'street_number'.tr,
                   inputType: TextInputType.streetAddress,
-                  focusNode: streetNode,
-                  nextFocus: houseNode,
-                  controller: widget.streetController,
+                  fieldType: HistoryFieldType.street,
                 ) : const SizedBox(),
                 SizedBox(height: !isDesktop ? Dimensions.paddingSizeLarge : 0),
 
                 Row(
                   children: [
                     isDesktop ? Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: widget.streetController,
+                        focusNode: streetNode,
+                        nextFocus: houseNode,
                         labelText: 'street_number'.tr,
                         titleText: 'street_number'.tr,
                         inputType: TextInputType.streetAddress,
-                        focusNode: streetNode,
-                        nextFocus: houseNode,
-                        controller: widget.streetController,
+                        fieldType: HistoryFieldType.street,
                       ),
                     ) : const SizedBox(),
                     SizedBox(width: isDesktop ? Dimensions.paddingSizeSmall : 0),
 
                     Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: widget.houseController,
+                        focusNode: houseNode,
+                        nextFocus: floorNode,
                         labelText: 'house'.tr,
                         titleText: 'house'.tr,
                         inputType: TextInputType.text,
-                        focusNode: houseNode,
-                        nextFocus: floorNode,
-                        controller: widget.houseController,
+                        fieldType: HistoryFieldType.house,
                       ),
                     ),
                     const SizedBox(width: Dimensions.paddingSizeSmall),
 
                     Expanded(
-                      child: CustomTextField(
+                      child: AddressHistoryTypeAheadField(
+                        controller: widget.floorController,
+                        focusNode: floorNode,
+                        nextFocus: nameNode,
                         labelText: 'floor'.tr,
                         titleText: 'floor'.tr,
                         inputType: TextInputType.text,
-                        focusNode: floorNode,
-                        nextFocus: nameNode,
-                        controller: widget.floorController,
+                        fieldType: HistoryFieldType.floor,
                       ),
                     ),
                   ],
