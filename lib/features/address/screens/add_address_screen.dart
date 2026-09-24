@@ -96,7 +96,7 @@ class _AddAddressScreenState extends State<AddAddressScreen> {
         _contactPersonNameController.text = '${Get.find<ProfileController>().userInfoModel!.fName} ${Get.find<ProfileController>().userInfoModel!.lName}';
         splitPhoneNumber(Get.find<ProfileController>().userInfoModel!.phone!);
       }
-
+    }
   }
 
   void initCall(){
