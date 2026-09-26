@@ -75,6 +75,7 @@ class _ReceiverViewWidgetState extends State<ReceiverViewWidget> {
     if (!_streetNode.hasFocus) {
       AddressFieldsHistoryHelper.saveApartmentNumber(_streetNumberController.text);
     }
+    }
 
   @override
   Widget build(BuildContext context) {

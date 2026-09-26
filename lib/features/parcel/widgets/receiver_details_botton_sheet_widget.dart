@@ -72,6 +72,7 @@ class _ReceiverDetailsBottomSheetWidgetState extends State<ReceiverDetailsBottom
     if (!_streetNode.hasFocus) {
       AddressFieldsHistoryHelper.saveApartmentNumber(_streetNumberController.text);
     }
+    }
 
   @override
   Widget build(BuildContext context) {

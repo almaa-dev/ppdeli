@@ -21,6 +21,7 @@ import 'package:pickles_and_pies/common/widgets/custom_dropdown.dart';
 import 'package:pickles_and_pies/common/widgets/custom_text_field.dart';
 import 'package:pickles_and_pies/common/widgets/address_history_typeahead_field.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/guest_delivery_address.dart';
+import 'package:pickles_and_pies/helper/address_helper.dart';
 
 class DeliverySection extends StatefulWidget {
   final CheckoutController checkoutController;
@@ -49,6 +50,28 @@ class _DeliverySectionState extends State<DeliverySection> {
     super.initState();
 
     _isExpanded = ResponsiveHelper.isDesktop(Get.context) ? true : false;
+ 
+    // Auto-populate the street number (road) field with the value saved in
+    // SharedPreferences from the user's last selected / saved address.
+    // This guarantees the field is pre-filled the moment the checkout
+    // screen opens, even when no address has been explicitly re-picked
+    // during this checkout session (e.g. when the controller's in-memory
+    // `_address` has not yet been refreshed by the async flows).
+    _loadSavedStreetNumber();
+  }
+
+  void _loadSavedStreetNumber() {
+    try {
+      if (!AuthHelper.isLoggedIn()) return;
+      if (widget.checkoutController.streetNumberController.text.trim().isNotEmpty) return;
+      final AddressModel? savedAddress = AddressHelper.getUserAddressFromSharedPref();
+      final String? savedStreet = savedAddress?.streetNumber;
+      if (savedStreet != null && savedStreet.trim().isNotEmpty) {
+        widget.checkoutController.streetNumberController.text = savedStreet;
+      }
+    } catch (_) {
+      // Silently ignore - this is a best-effort auto-populate step.
+    }
   }
 
   @override

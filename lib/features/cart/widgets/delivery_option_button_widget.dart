@@ -1,5 +1,4 @@
 import 'package:pickles_and_pies/common/widgets/custom_tool_tip_widget.dart';
-import 'package:pickles_and_pies/features/splash/controllers/splash_controller.dart';
 import 'package:pickles_and_pies/features/checkout/controllers/checkout_controller.dart';
 import 'package:pickles_and_pies/helper/price_converter.dart';
 import 'package:pickles_and_pies/util/dimensions.dart';
