@@ -412,6 +412,21 @@ class CheckoutController extends GetxController implements GetxService {
   }
 
   void setOrderType(String? type, {bool notify = true}) {
+    // Respect the Delivery Service Hours decision: if Home Delivery is
+    // requested but currently unavailable (outside the store's service
+    // window or on a closed day), force the order type to 'take_away'.
+    // This single source-of-truth guard prevents external callers
+    // (notably StoreController._setOrderTypeFromStore, which runs AFTER
+    // _applyDeliveryHours during getStoreDetails) from re-introducing
+    // 'delivery' as the selected order type on the Checkout screen when
+    // delivery is actually disabled.
+    //
+    // This complements _applyDeliveryHours(), which already flips to
+    // 'take_away' inside the resolver flow; this guard catches every
+    // other path that mutates _orderType.
+    if (type == 'delivery' && !_isDeliveryAvailable) {
+      type = 'take_away';
+    }
     _orderType = type;
     if(notify) {
       update();
@@ -1838,7 +1853,17 @@ class CheckoutController extends GetxController implements GetxService {
     }
     contactPersonAddressController.text = _address?.address ?? '';
     contactPersonNameController.text = _address?.contactPersonName ?? name;
-    streetNumberController.text = _address?.streetNumber ?? '';
+    contactPersonNameController.text = _address?.contactPersonName ?? name;
+    // The "street_number" field is intentionally NOT overwritten when the
+    // controller already holds a non-empty value: the user may have typed
+    // it on a previous visit and we want the value to persist across
+    // reopens of Checkout. DeliverySection also auto-populates this field
+    // from AddressFieldsHistoryHelper.getApartmentNumber() in its
+    // didChangeDependencies() hook, so we must NOT clobber it with the
+    // (typically empty) `_address?.streetNumber` value here.
+    if (streetNumberController.text.trim().isEmpty) {
+      streetNumberController.text = _address?.streetNumber ?? '';
+    }
     houseController.text = _address?.house ?? '';
     floorController.text = _address?.floor ?? '';
     if (kDebugMode) {
