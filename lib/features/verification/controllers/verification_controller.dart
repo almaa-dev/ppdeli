@@ -16,7 +16,8 @@ class VerificationController extends GetxController implements GetxService {
   String get verificationCode => _verificationCode;
 
   void updateVerificationCode(String query, {bool canUpdate = true}) {
-    _verificationCode = query;
+    final digitsOnly = query.replaceAll(RegExp(r'[^0-9]'), '');
+    _verificationCode = digitsOnly.length > 6 ? digitsOnly.substring(0, 6) : digitsOnly;
     if(canUpdate){
       update();
     }

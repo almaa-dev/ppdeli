@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:pickles_and_pies/common/models/response_model.dart';
 import 'package:pickles_and_pies/common/widgets/custom_asset_image_widget.dart';
 import 'package:pickles_and_pies/features/auth/domain/enum/centralize_login_enum.dart';
@@ -167,8 +168,17 @@ class VerificationScreenState extends State<VerificationScreen> {
                   animationDuration: const Duration(milliseconds: 300),
                   backgroundColor: Colors.transparent,
                   enableActiveFill: true,
+                  enablePinAutofill: false,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
+                  ],
                   onChanged: verificationController.updateVerificationCode,
-                  beforeTextPaste: (text) => true,
+                  beforeTextPaste: (text) {
+                    if (text == null || text.isEmpty) return false;
+                    final digitsOnly = text.replaceAll(RegExp(r'[^0-9]'), '');
+                    return digitsOnly.isNotEmpty;
+                  },
                   errorAnimationController: errorController, // Optional: Custom error animation
                   errorTextSpace: 20, // Space for error text
                   errorTextMargin: const EdgeInsets.only(top: 10),
