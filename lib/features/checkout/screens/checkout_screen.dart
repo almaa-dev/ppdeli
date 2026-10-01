@@ -75,6 +75,13 @@ class CheckoutScreenState extends State<CheckoutScreen> {
   bool _isWalletActive = false;
   String _deliveryChargeForView = '';
 
+  /// Last computed delivery-charge value (resolved by [DeliveryFeeResolver]).
+  /// Stored as widget state so [_runOrderSubmission] / [_submitNormalOrder]
+  /// can forward it to [PlaceOrderBodyModel] as the standalone
+  /// `delivery_charge` field. -1.0 means "still calculating" — treated as 0
+  /// when building the request body.
+  double _lastDeliveryCharge = -1.0;
+
   List<AddressModel> address = [];
   bool canCheckSmall = false;
   bool _isCashBackSnackBarShown = false;
@@ -378,6 +385,22 @@ class CheckoutScreenState extends State<CheckoutScreen> {
             deliveryCharge = -1.0;
           } else {
             deliveryCharge = feeSnapshot.value;
+          }
+
+          // Persist the resolved delivery-charge on the widget so the order-
+          // submission pipeline (which runs OUTSIDE this build closure) can
+          // forward it as the standalone `delivery_charge` field to the
+          // backend. Without this the PlaceOrderBodyModel would always send
+          // 0 / null and the vendor app would never display a separate line
+          // for delivery.
+          //
+          // We only overwrite the cached value once the resolver produced a
+          // real answer (free/paid); while it is still "calculating" we keep
+          // the previous concrete value so a quick re-tap on Place Order
+          // before the async pipeline settles still sends the last known
+          // charge instead of 0.
+          if (!feeSnapshot.isLoading) {
+            _lastDeliveryCharge = deliveryCharge;
           }
 
           // Pre-format the displayed string so it is stable for the whole
@@ -737,6 +760,15 @@ class CheckoutScreenState extends State<CheckoutScreen> {
       maxCodOrderAmount = checkoutController.store?.minimumOrder;
     } catch (_) {}
 
+    // Take-away orders and still-loading sentinels should always send 0
+    // so the backend never stores a "phantom" delivery charge when the
+    // customer is picking up in-store or the resolver hasn't produced
+    // a concrete value yet.
+    final double deliveryChargeForBody =
+        (checkoutController.orderType == 'take_away' || _lastDeliveryCharge < 0)
+            ? 0.0
+            : _lastDeliveryCharge;
+
     AddressModel? finalAddress =
         isGuestLogIn ? checkoutController.guestAddress : checkoutController.address;
 
@@ -786,6 +818,7 @@ class CheckoutScreenState extends State<CheckoutScreen> {
         discount: discount,
         maxCodOrderAmount: maxCodOrderAmount,
         isGuestLogIn: isGuestLogIn,
+        deliveryCharge: deliveryChargeForBody,
       );
     } else {
       _submitPrescriptionOrder(
@@ -806,6 +839,7 @@ class CheckoutScreenState extends State<CheckoutScreen> {
     required double discount,
     required double? maxCodOrderAmount,
     required bool isGuestLogIn,
+    required double deliveryCharge,
   }) async {
     List<OnlineCart> carts = [];
     for (int index = 0; index < _cartList!.length; index++) {
@@ -870,7 +904,8 @@ class CheckoutScreenState extends State<CheckoutScreen> {
       extraPackagingAmount: Get.find<CartController>().needExtraPackage ? checkoutController.store!.extraPackagingAmount : 0,
       createNewUser: checkoutController.isCreateAccount ? 1 : 0, password: guestPasswordController.text,
       bringChangeAmount: checkoutController.paymentMethodIndex == 0 && checkoutController.exchangeAmount > 0 ? checkoutController.exchangeAmount : null,
-    );
+      deliveryCharge: deliveryCharge,
+   );
 
     // Persist the entered sub-address values so the next time the user opens
     // the address sub-fields they get the previous entries as suggestions.

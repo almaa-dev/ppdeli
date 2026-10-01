@@ -232,7 +232,7 @@ class BottomSection extends StatelessWidget {
 
               checkoutController.distance == -1 ? Text(
                 'calculating'.tr, style: robotoRegular.copyWith(color: Colors.red),
-              ) : (deliveryCharge == 0 || (couponController.coupon != null && couponController.coupon!.couponType == 'free_delivery')) ? Text(
+              ) : (couponController.coupon != null && couponController.coupon!.couponType == 'free_delivery') ? Text(
                 'free'.tr, style: robotoRegular.copyWith(color: Theme.of(context).primaryColor),
               ) : Text(
                 '(+) ${PriceConverter.convertPrice(deliveryCharge)}', style: robotoRegular, textDirection: TextDirection.ltr,

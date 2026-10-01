@@ -117,8 +117,7 @@ class TopSection extends StatelessWidget {
                 // `deliveryCharge == 0` check, which used to over-load the
                 // meaning of `0` and contributed to the
                 // Free -> $5 -> Free flicker.
-                isFree: (checkoutController.store!.freeDelivery ?? false) ||
-                        (deliveryCharge == 0),
+                isFree: (checkoutController.store!.freeDelivery ?? false),
                 fromWeb: true, total: total,
                 deliveryChargeForView: deliveryChargeForView, badWeatherCharge: badWeatherCharge, extraChargeForToolTip: extraChargeForToolTip,
                 enabled: checkoutController.isDeliveryAvailable,
@@ -133,8 +132,7 @@ class TopSection extends StatelessWidget {
                   // is intentionally NOT considered Free (the previous code
                   // over-loaded `0` for both meanings, which caused the
                   // Free -> $5 -> Free flicker).
-                  isFree: (checkoutController.store!.freeDelivery ?? false) ||
-                          (deliveryCharge == 0),
+                  isFree: (checkoutController.store!.freeDelivery ?? false),
                   fromWeb: true, total: total,
                   deliveryChargeForView: deliveryChargeForView, badWeatherCharge: badWeatherCharge, extraChargeForToolTip: extraChargeForToolTip,
                   enabled: checkoutController.isDeliveryAvailable,
