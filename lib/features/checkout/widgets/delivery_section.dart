@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:pickles_and_pies/common/widgets/address_widget.dart';
 import 'package:pickles_and_pies/common/widgets/custom_bottom_sheet_widget.dart';
 import 'package:pickles_and_pies/common/widgets/custom_loader.dart';
+import 'package:pickles_and_pies/features/address/controllers/address_controller.dart';
 import 'package:pickles_and_pies/features/address/domain/models/address_model.dart';
 import 'package:pickles_and_pies/features/checkout/controllers/checkout_controller.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/address_bottom_sheet.dart';
@@ -21,6 +22,7 @@ import 'package:pickles_and_pies/common/widgets/custom_dropdown.dart';
 import 'package:pickles_and_pies/common/widgets/custom_text_field.dart';
 import 'package:pickles_and_pies/common/widgets/address_history_typeahead_field.dart';
 import 'package:pickles_and_pies/features/checkout/widgets/guest_delivery_address.dart';
+import 'package:pickles_and_pies/helper/address_fields_history_helper.dart';
 import 'package:pickles_and_pies/helper/address_helper.dart';
 
 class DeliverySection extends StatefulWidget {
@@ -50,7 +52,7 @@ class _DeliverySectionState extends State<DeliverySection> {
     super.initState();
 
     _isExpanded = ResponsiveHelper.isDesktop(Get.context) ? true : false;
- 
+
     // Auto-populate the street number (road) field with the value saved in
     // SharedPreferences from the user's last selected / saved address.
     // This guarantees the field is pre-filled the moment the checkout
@@ -60,10 +62,66 @@ class _DeliverySectionState extends State<DeliverySection> {
     _loadSavedStreetNumber();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-attempt the auto-populate after the parent CheckoutScreen has
+    // finished its `initCall()` flow. The CheckoutController's `insertAddresses`
+    // runs in a microtask after the first frame and can overwrite the
+    // street number with an empty value (because the saved address pin
+    // usually does not carry the apartment number). Re-applying the saved
+    // value AFTER that flow guarantees the field stays populated.
+    _loadSavedStreetNumber();
+  }
+
   void _loadSavedStreetNumber() {
     try {
+      // Skip when the user is not logged in - the helper is keyed off the
+      // device SharedPreferences, but guest sessions intentionally start
+      // clean and the saved value belongs to the previous (logged-in) user.
       if (!AuthHelper.isLoggedIn()) return;
       if (widget.checkoutController.streetNumberController.text.trim().isNotEmpty) return;
+
+      // PRIMARY source (most recent delivery address):
+      // The address the user last selected / last delivered to, fetched
+      // from AddressController. The "active" address is the one at
+      // [addressIndex] (which is set by CheckoutController.setAddressIndex
+      // when a saved address becomes the default for this checkout).
+      // If the server-side "road" field on that address is populated we
+      // use it - it represents the apartment number of the user's most
+      // recent successful delivery.
+      String? lastDeliveryStreet;
+      if (Get.isRegistered<AddressController>()) {
+        final AddressController addressController = Get.find<AddressController>();
+        final List<AddressModel>? savedAddresses = addressController.addressList;
+        if (savedAddresses != null && savedAddresses.isNotEmpty) {
+          final int? activeIndex = widget.checkoutController.addressIndex;
+          int index = 0;
+          if (activeIndex != null && activeIndex >= 0 && activeIndex < savedAddresses.length) {
+            index = activeIndex;
+          }
+          lastDeliveryStreet = savedAddresses[index].streetNumber;
+        }
+      }
+      if (lastDeliveryStreet != null && lastDeliveryStreet.trim().isNotEmpty) {
+        widget.checkoutController.streetNumberController.text = lastDeliveryStreet;
+        return;
+      }
+
+      // SECONDARY source: the "last-used apartment number" persisted by
+      // AddressFieldsHistoryHelper every time the user places an order
+      // (see checkout_screen._submitNormalOrder -> saveAddressDetailHistory).
+      // This is the value the user actually typed in the last checkout
+      // and is the source-of-truth for the auto-fill behaviour.
+      final String? savedApartmentNumber = AddressFieldsHistoryHelper.getApartmentNumber();
+      if (savedApartmentNumber != null && savedApartmentNumber.trim().isNotEmpty) {
+        widget.checkoutController.streetNumberController.text = savedApartmentNumber;
+        return;
+      }
+
+      // FALLBACK: the saved address pin (only useful when the user had
+      // previously saved an address whose "road" field was populated -
+      // usually empty in practice, but kept as a safety net).
       final AddressModel? savedAddress = AddressHelper.getUserAddressFromSharedPref();
       final String? savedStreet = savedAddress?.streetNumber;
       if (savedStreet != null && savedStreet.trim().isNotEmpty) {
@@ -353,13 +411,14 @@ class _DeliverySectionState extends State<DeliverySection> {
             children: [
               if(_isExpanded) ...[
               const SizedBox(height: Dimensions.paddingSizeLarge),
-              !isDesktop ? CustomTextField(
+              !isDesktop ? AddressHistoryTypeAheadField(
+                controller: widget.checkoutController.streetNumberController,
+                focusNode: widget.checkoutController.streetNode,
+                nextFocus: widget.checkoutController.houseNode,
                 labelText: 'street_number'.tr,
                 titleText: 'write_street_number'.tr,
                 inputType: TextInputType.streetAddress,
-                focusNode: widget.checkoutController.streetNode,
-                nextFocus: widget.checkoutController.houseNode,
-                controller: widget.checkoutController.streetNumberController,
+                fieldType: HistoryFieldType.street,
               ) : const SizedBox(),
               SizedBox(height: !isDesktop ? Dimensions.paddingSizeLarge : 0),
 
