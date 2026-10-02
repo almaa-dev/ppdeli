@@ -1,135 +1,90 @@
-name: Build iOS Release IPA
+name: Build iOS IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build-ios:
-    name: Build iOS Release
+    name: Build Signed iOS Release IPA
     runs-on: macos-14
+    timeout-minutes: 60
 
     env:
-      FLUTTER_VERSION: "3.44.8"
-      BUNDLE_ID: "com.ppdeli.market"
-      TEAM_ID: "G54KQ62958"
+      APPLE_TEAM_ID: G54KQ62958
+      BUNDLE_ID: com.ppdeli.market
+      PROFILE_NAME: ppdeli2
 
     steps:
 
-      # =========================================================
+      # ---------------------------------------------------------
       # 1. Checkout
-      # =========================================================
+      # ---------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # =========================================================
+      # ---------------------------------------------------------
       # 2. Setup Flutter
-      # =========================================================
+      # ---------------------------------------------------------
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: '3.44.8'
           channel: stable
           cache: true
 
 
-      # =========================================================
+      # ---------------------------------------------------------
       # 3. Flutter information
-      # =========================================================
-      - name: Flutter doctor
+      # ---------------------------------------------------------
+      - name: Flutter information
         run: |
           flutter --version
           flutter doctor -v
 
 
-      # =========================================================
+      # ---------------------------------------------------------
       # 4. Disable Swift Package Manager
-      #
-      # Flutter 3.44+ enables Swift Package Manager by default.
-      # We disable it and use CocoaPods.
-      # =========================================================
+      # ---------------------------------------------------------
       - name: Disable Swift Package Manager
         run: |
           flutter config --no-enable-swift-package-manager
 
-          echo "Flutter configuration:"
-          flutter config --list
 
-
-      # =========================================================
-      # 5. Flutter clean
-      # =========================================================
-      - name: Flutter clean
-        run: |
-          flutter clean
-
-
-      # =========================================================
-      # 6. Flutter Pub Get
-      #
-      # IMPORTANT:
-      # This MUST happen before pod install.
-      #
-      # flutter pub get creates:
-      #
-      # ios/Flutter/Generated.xcconfig
-      #
-      # which is required by the Podfile.
-      # =========================================================
-      - name: Flutter Pub Get
+      # ---------------------------------------------------------
+      # 5. Flutter dependencies
+      # ---------------------------------------------------------
+      - name: Flutter pub get
         run: |
           flutter pub get
 
 
-      # =========================================================
-      # 7. Verify Generated.xcconfig
-      # =========================================================
-      - name: Verify Generated.xcconfig
+      # ---------------------------------------------------------
+      # 6. CocoaPods
+      # ---------------------------------------------------------
+      - name: Install CocoaPods dependencies
         run: |
-          if [ ! -f "ios/Flutter/Generated.xcconfig" ]; then
-            echo "ERROR: ios/Flutter/Generated.xcconfig does not exist."
-            echo "flutter pub get did not generate the required file."
-            exit 1
-          fi
-
-          echo "Generated.xcconfig exists."
-          ls -lh ios/Flutter/Generated.xcconfig
-
-
-      # =========================================================
-      # 8. Install CocoaPods
-      #
-      # IMPORTANT:
-      # This is AFTER flutter pub get.
-      # =========================================================
-      - name: Install CocoaPods
-        working-directory: ios
-        run: |
-          echo "Removing old CocoaPods data..."
-
-          rm -rf Pods
-          rm -f Podfile.lock
-
-          echo "Installing CocoaPods dependencies..."
-
+          cd ios
+          pod repo update
           pod install --repo-update
+          cd ..
 
 
-      # =========================================================
-      # 9. Decode Apple Distribution Certificate
-      # =========================================================
-      - name: Install Apple Distribution Certificate
+      # ---------------------------------------------------------
+      # 7. Create temporary keychain
+      # ---------------------------------------------------------
+      - name: Create temporary keychain
         env:
-          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-
         run: |
           set -e
 
-          echo "Creating temporary keychain..."
-
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo "Creating temporary keychain..."
 
           security create-keychain \
             -p "$KEYCHAIN_PASSWORD" \
@@ -143,22 +98,84 @@ jobs:
             -p "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+
+      # ---------------------------------------------------------
+      # 8. Decode P12
+      # ---------------------------------------------------------
+      - name: Decode Apple certificate
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+        run: |
+          set -e
+
           echo "Decoding Apple certificate..."
 
-          echo "$IOS_CERTIFICATE_BASE64" | base64 --decode \
+          printf '%s' "$IOS_CERTIFICATE_BASE64" \
+            | base64 --decode \
             > "$RUNNER_TEMP/ios_distribution.p12"
+
+          echo "Decoded P12:"
+          ls -lh "$RUNNER_TEMP/ios_distribution.p12"
+
+
+      # ---------------------------------------------------------
+      # 9. Verify P12 BEFORE security import
+      # ---------------------------------------------------------
+      - name: Verify decoded P12
+        env:
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -e
+
+          echo "Testing decoded P12 with OpenSSL..."
+
+          printf '%s' "$IOS_CERTIFICATE_PASSWORD" \
+            | openssl pkcs12 \
+              -in "$RUNNER_TEMP/ios_distribution.p12" \
+              -passin stdin \
+              -noout
+
+          echo "P12 verification successful."
+
+
+      # ---------------------------------------------------------
+      # 10. Import P12 into temporary keychain
+      # ---------------------------------------------------------
+      - name: Import Apple Distribution certificate
+        env:
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -e
 
           echo "Importing Apple Distribution certificate..."
 
-          security import \
-            "$RUNNER_TEMP/ios_distribution.p12" \
+          security import "$RUNNER_TEMP/ios_distribution.p12" \
+            -k "$KEYCHAIN_PATH" \
             -P "$IOS_CERTIFICATE_PASSWORD" \
-            -A \
-            -t cert \
-            -f pkcs12 \
-            "$KEYCHAIN_PATH"
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
 
-          echo "Configuring keychain permissions..."
+          echo "Certificate imported successfully."
+
+
+      # ---------------------------------------------------------
+      # 11. Allow codesign access to private key
+      # ---------------------------------------------------------
+      - name: Configure keychain access
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -e
+
+          security unlock-keychain \
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
 
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
@@ -166,445 +183,349 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
-          security list-keychains \
-            -d user \
-            -s "$KEYCHAIN_PATH"
+          echo "Keychain access configured."
 
-          echo ""
+
+      # ---------------------------------------------------------
+      # 12. Verify Apple Distribution identity
+      # ---------------------------------------------------------
+      - name: Verify signing identity
+        run: |
+          set -e
+
           echo "Available signing identities:"
+
           security find-identity \
             -v \
             -p codesigning \
             "$KEYCHAIN_PATH"
 
+          echo "Checking Apple Distribution identity..."
 
-      # =========================================================
-      # 10. Install Provisioning Profile
-      # =========================================================
-      - name: Install Provisioning Profile
+          security find-identity \
+            -v \
+            -p codesigning \
+            "$KEYCHAIN_PATH" \
+            | grep "Apple Distribution"
+
+          echo "Apple Distribution identity found."
+
+
+      # ---------------------------------------------------------
+      # 13. Decode provisioning profile
+      # ---------------------------------------------------------
+      - name: Install provisioning profile
         env:
-          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-
+          IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
         run: |
           set -e
 
-          mkdir -p \
-            "$HOME/Library/MobileDevice/Provisioning Profiles"
-
           echo "Decoding provisioning profile..."
 
-          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$IOS_PROVISION_PROFILE_BASE64" \
+            | base64 --decode \
+            > "$RUNNER_TEMP/ppdeli2.mobileprovision"
 
-          echo "Reading provisioning profile..."
-
-          security cms -D \
-            -i "$RUNNER_TEMP/profile.mobileprovision" \
-            > "$RUNNER_TEMP/profile.plist"
-
-          PROFILE_NAME=$(
-            /usr/libexec/PlistBuddy \
-            -c "Print :Name" \
-            "$RUNNER_TEMP/profile.plist"
-          )
+          echo "Installing provisioning profile..."
 
           PROFILE_UUID=$(
             /usr/libexec/PlistBuddy \
+              -c "Print :UUID" \
+              /dev/stdin \
+              < <(
+                security cms -D \
+                -i "$RUNNER_TEMP/ppdeli2.mobileprovision"
+              )
+          )
+
+          PROFILE_NAME=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Name" \
+              /dev/stdin \
+              < <(
+                security cms -D \
+                -i "$RUNNER_TEMP/ppdeli2.mobileprovision"
+              )
+          )
+
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          cp \
+            "$RUNNER_TEMP/ppdeli2.mobileprovision" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+          echo "Profile installed."
+          echo "Profile Name: $PROFILE_NAME"
+          echo "Profile UUID: $PROFILE_UUID"
+
+
+      # ---------------------------------------------------------
+      # 14. Verify provisioning profile
+      # ---------------------------------------------------------
+      - name: Verify provisioning profile
+        run: |
+          set -e
+
+          security cms -D \
+            -i "$RUNNER_TEMP/ppdeli2.mobileprovision" \
+            > "$RUNNER_TEMP/profile.plist"
+
+          echo "Provisioning profile information:"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :Name" \
+            "$RUNNER_TEMP/profile.plist"
+
+          /usr/libexec/PlistBuddy \
             -c "Print :UUID" \
             "$RUNNER_TEMP/profile.plist"
-          )
 
-          PROFILE_TEAM_ID=$(
-            /usr/libexec/PlistBuddy \
+          /usr/libexec/PlistBuddy \
             -c "Print :TeamIdentifier:0" \
             "$RUNNER_TEMP/profile.plist"
-          )
 
-          PROFILE_APP_ID=$(
-            /usr/libexec/PlistBuddy \
+          echo "Application Identifier:"
+
+          /usr/libexec/PlistBuddy \
             -c "Print :Entitlements:application-identifier" \
             "$RUNNER_TEMP/profile.plist"
-          )
 
-          echo ""
-          echo "=========================================="
-          echo "Provisioning Profile Information"
-          echo "=========================================="
-          echo "Name: $PROFILE_NAME"
-          echo "UUID: $PROFILE_UUID"
-          echo "Team ID: $PROFILE_TEAM_ID"
-          echo "Application ID: $PROFILE_APP_ID"
-          echo "=========================================="
-          echo ""
+          echo "get-task-allow:"
 
-          # Verify Team ID
-          if [ "$PROFILE_TEAM_ID" != "${TEAM_ID}" ]; then
-            echo "ERROR: Provisioning Profile Team ID does not match."
+          /usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:get-task-allow" \
+            "$RUNNER_TEMP/profile.plist"
 
-            echo "Expected:"
-            echo "${TEAM_ID}"
+          echo "Checking Team ID..."
 
-            echo "Found:"
-            echo "$PROFILE_TEAM_ID"
+          /usr/libexec/PlistBuddy \
+            -c "Print :TeamIdentifier:0" \
+            "$RUNNER_TEMP/profile.plist" \
+            | grep -Fx "$APPLE_TEAM_ID"
 
-            exit 1
-          fi
+          echo "Checking Bundle ID..."
 
-          # Verify Bundle ID
-          if [[ "$PROFILE_APP_ID" != *"${BUNDLE_ID}" ]]; then
-            echo "ERROR: Provisioning Profile does not match Bundle ID."
+          /usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:application-identifier" \
+            "$RUNNER_TEMP/profile.plist" \
+            | grep -Fx "${APPLE_TEAM_ID}.${BUNDLE_ID}"
 
-            echo "Expected:"
-            echo "${BUNDLE_ID}"
-
-            echo "Found:"
-            echo "$PROFILE_APP_ID"
-
-            exit 1
-          fi
-
-          # Install profile
-          cp \
-            "$RUNNER_TEMP/profile.mobileprovision" \
-            "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
-
-          # Export variables for later steps
-          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
-          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
-
-          echo "Provisioning Profile installed successfully."
+          echo "Provisioning profile verification successful."
 
 
-      # =========================================================
-      # 11. Configure Xcode Manual Signing
-      #
-      # Fixes:
-      #
-      # Runner has conflicting provisioning settings.
-      #
-      # Automatic Development signing
-      # vs
-      # Apple Distribution manual signing.
-      # =========================================================
-      - name: Configure Xcode Manual Signing
-        env:
-          PROFILE_NAME: ${{ env.PROFILE_NAME }}
-          TEAM_ID: ${{ env.TEAM_ID }}
-          BUNDLE_ID: ${{ env.BUNDLE_ID }}
-
+      # ---------------------------------------------------------
+      # 15. Configure Xcode project signing
+      # ---------------------------------------------------------
+      - name: Configure manual code signing
         run: |
           set -e
 
           PROJECT_FILE="ios/Runner.xcodeproj/project.pbxproj"
 
-          echo "Xcode project:"
-          echo "$PROJECT_FILE"
-
-          if [ ! -f "$PROJECT_FILE" ]; then
-            echo "ERROR: Xcode project file does not exist."
-            exit 1
-          fi
+          echo "Configuring manual signing..."
 
           python3 <<'PY'
-          import os
-          import re
+          from pathlib import Path
 
-          path = "ios/Runner.xcodeproj/project.pbxproj"
+          path = Path("ios/Runner.xcodeproj/project.pbxproj")
+          text = path.read_text()
 
-          team_id = os.environ["TEAM_ID"]
-          bundle_id = os.environ["BUNDLE_ID"]
-          profile_name = os.environ["PROFILE_NAME"]
+          bundle_id = "com.ppdeli.market"
+          team_id = "G54KQ62958"
 
-          with open(path, "r", encoding="utf-8") as f:
-              content = f.read()
+          blocks = text.split("\n")
 
-          # -----------------------------------------------------
-          # Remove old signing settings.
-          # -----------------------------------------------------
-          content = re.sub(
-              r'^\s*CODE_SIGN_STYLE\s*=.*?;\s*$',
-              '',
-              content,
-              flags=re.MULTILINE
-          )
+          inside_target_config = False
+          brace_depth = 0
+          output = []
 
-          content = re.sub(
-              r'^\s*CODE_SIGN_IDENTITY\s*=.*?;\s*$',
-              '',
-              content,
-              flags=re.MULTILINE
-          )
+          for line in blocks:
 
-          content = re.sub(
-              r'^\s*DEVELOPMENT_TEAM\s*=.*?;\s*$',
-              '',
-              content,
-              flags=re.MULTILINE
-          )
+              if "buildSettings = {" in line:
+                  inside_target_config = True
+                  brace_depth = 1
 
-          content = re.sub(
-              r'^\s*PROVISIONING_PROFILE_SPECIFIER\s*=.*?;\s*$',
-              '',
-              content,
-              flags=re.MULTILINE
-          )
+              elif inside_target_config:
+                  brace_depth += line.count("{")
+                  brace_depth -= line.count("}")
 
-          # -----------------------------------------------------
-          # Replace Bundle Identifier.
-          # -----------------------------------------------------
-          content = re.sub(
-              r'^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=.*?;\s*$',
-              f'                PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};',
-              content,
-              flags=re.MULTILINE
-          )
+              if inside_target_config:
 
-          # -----------------------------------------------------
-          # Find every buildSettings block and add signing settings.
-          # -----------------------------------------------------
-          pattern = r'(buildSettings = \{\n)(.*?)(\n\s*\};)'
+                  if f"PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};" in line:
 
-          def add_signing(match):
-              start = match.group(1)
-              body = match.group(2)
-              end = match.group(3)
+                      indent = line[:len(line) - len(line.lstrip())]
 
-              signing = f'''
-                  CODE_SIGN_STYLE = Manual;
-                  CODE_SIGN_IDENTITY = "Apple Distribution";
-                  DEVELOPMENT_TEAM = {team_id};
-                  PROVISIONING_PROFILE_SPECIFIER = "{profile_name}";
-              '''
+                      output.append(
+                          indent + "CODE_SIGN_STYLE = Manual;"
+                      )
 
-              return start + body + signing + end
+                      output.append(
+                          indent + f"DEVELOPMENT_TEAM = {team_id};"
+                      )
 
-          content = re.sub(
-              pattern,
-              add_signing,
-              content,
-              flags=re.DOTALL
-          )
+                      output.append(
+                          indent + "CODE_SIGN_IDENTITY = \"Apple Distribution\";"
+                      )
 
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(content)
+                      output.append(
+                          indent + "PROVISIONING_PROFILE_SPECIFIER = \"ppdeli2\";"
+                      )
 
-          print("Manual signing configuration applied.")
+              output.append(line)
+
+              if inside_target_config and brace_depth <= 0:
+                  inside_target_config = False
+                  brace_depth = 0
+
+          path.write_text("\n".join(output))
+
+          print("Xcode signing configuration updated.")
           PY
 
-          echo ""
-          echo "Checking Xcode signing settings..."
-          echo ""
+          echo "Checking signing configuration..."
 
-          grep -n "CODE_SIGN_STYLE" "$PROJECT_FILE" || true
-          grep -n "CODE_SIGN_IDENTITY" "$PROJECT_FILE" || true
-          grep -n "DEVELOPMENT_TEAM" "$PROJECT_FILE" || true
-          grep -n "PROVISIONING_PROFILE_SPECIFIER" "$PROJECT_FILE" || true
-          grep -n "PRODUCT_BUNDLE_IDENTIFIER" "$PROJECT_FILE" || true
+          grep -n \
+            -E \
+            "CODE_SIGN_STYLE|DEVELOPMENT_TEAM|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|PRODUCT_BUNDLE_IDENTIFIER" \
+            "$PROJECT_FILE" \
+            | head -80
 
 
-      # =========================================================
-      # 12. Create ExportOptions.plist
-      # =========================================================
+      # ---------------------------------------------------------
+      # 16. Create ExportOptions.plist
+      # ---------------------------------------------------------
       - name: Create ExportOptions.plist
-        env:
-          PROFILE_NAME: ${{ env.PROFILE_NAME }}
-          TEAM_ID: ${{ env.TEAM_ID }}
-          BUNDLE_ID: ${{ env.BUNDLE_ID }}
-
         run: |
+          set -e
+
           cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
 
-            <key>method</key>
-            <string>app-store</string>
+              <key>method</key>
+              <string>app-store</string>
 
-            <key>destination</key>
-            <string>export</string>
+              <key>destination</key>
+              <string>export</string>
 
-            <key>signingStyle</key>
-            <string>manual</string>
+              <key>signingStyle</key>
+              <string>manual</string>
 
-            <key>teamID</key>
-            <string>${TEAM_ID}</string>
+              <key>teamID</key>
+              <string>G54KQ62958</string>
 
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>${BUNDLE_ID}</key>
-              <string>${PROFILE_NAME}</string>
-            </dict>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.ppdeli.market</key>
+                  <string>ppdeli2</string>
+              </dict>
 
-            <key>compileBitcode</key>
-            <false/>
+              <key>stripSwiftSymbols</key>
+              <true/>
 
-            <key>stripSwiftSymbols</key>
-            <true/>
-
-            <key>uploadSymbols</key>
-            <true/>
+              <key>uploadSymbols</key>
+              <true/>
 
           </dict>
           </plist>
           EOF
 
-          echo "=========================================="
-          echo "ExportOptions.plist"
-          echo "=========================================="
+          echo "ExportOptions.plist created."
 
           cat ios/ExportOptions.plist
 
 
-      # =========================================================
-      # 13. Verify iOS configuration
-      # =========================================================
-      - name: Verify iOS configuration
+      # ---------------------------------------------------------
+      # 17. Clean Flutter
+      # ---------------------------------------------------------
+      - name: Flutter clean
         run: |
-          echo "Checking iOS files..."
-
-          test -f ios/Flutter/Generated.xcconfig
-          test -f ios/Runner.xcodeproj/project.pbxproj
-          test -f ios/ExportOptions.plist
-          test -d ios/Pods
-
-          echo "All required iOS files exist."
-
-          echo ""
-          echo "Checking Swift Package Manager references..."
-
-          if grep -R "FlutterGeneratedPluginSwiftPackage" \
-            ios/Runner.xcodeproj \
-            2>/dev/null; then
-
-            echo ""
-            echo "WARNING:"
-            echo "FlutterGeneratedPluginSwiftPackage reference detected."
-
-          else
-
-            echo "No FlutterGeneratedPluginSwiftPackage reference detected."
-
-          fi
+          flutter clean
+          flutter pub get
 
 
-      # =========================================================
-      # 14. Verify Apple Distribution Certificate
-      # =========================================================
-      - name: Verify Apple Distribution Certificate
+      # ---------------------------------------------------------
+      # 18. Reinstall Pods after clean
+      # ---------------------------------------------------------
+      - name: Reinstall Pods
         run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
-
-          echo "Checking Apple Distribution certificate..."
-
-          security find-identity \
-            -v \
-            -p codesigning \
-            "$KEYCHAIN_PATH"
-
-          echo ""
-
-          if security find-identity \
-            -v \
-            -p codesigning \
-            "$KEYCHAIN_PATH" | grep -q "Apple Distribution"; then
-
-            echo "Apple Distribution certificate found."
-
-          else
-
-            echo "ERROR: Apple Distribution certificate not found."
-            exit 1
-
-          fi
+          cd ios
+          pod install --repo-update
+          cd ..
 
 
-      # =========================================================
-      # 15. Build signed IPA
-      # =========================================================
-      - name: Build iOS IPA
+      # ---------------------------------------------------------
+      # 19. Build signed IPA
+      # ---------------------------------------------------------
+      - name: Build signed IPA
         run: |
           set -e
-
-          echo "=========================================="
-          echo "Building iOS App Store IPA"
-          echo "=========================================="
 
           flutter build ipa \
             --release \
             --export-options-plist=ios/ExportOptions.plist
 
-          echo ""
-          echo "=========================================="
-          echo "IPA files"
-          echo "=========================================="
 
-          ls -lah build/ios/ipa/
-
-
-      # =========================================================
-      # 16. Verify IPA
-      # =========================================================
-      - name: Verify IPA
+      # ---------------------------------------------------------
+      # 20. Show generated IPA
+      # ---------------------------------------------------------
+      - name: Find IPA
         run: |
-          set -e
+          echo "Generated IPA files:"
 
-          IPA_COUNT=$(find build/ios/ipa -name "*.ipa" | wc -l | tr -d ' ')
-
-          if [ "$IPA_COUNT" -eq 0 ]; then
-            echo "ERROR: No IPA file was generated."
-            exit 1
-          fi
-
-          echo "IPA generated successfully."
-
-          find build/ios/ipa \
-            -name "*.ipa" \
-            -exec ls -lh {} \;
+          find build/ios -type f \
+            \( -name "*.ipa" -o -name "*.dSYM.zip" \) \
+            -print
 
 
-      # =========================================================
-      # 17. Upload IPA Artifact
-      # =========================================================
-      - name: Upload iOS IPA
+      # ---------------------------------------------------------
+      # 21. Upload IPA
+      # ---------------------------------------------------------
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-release-ipa
-          path: build/ios/ipa/*.ipa
-          if-no-files-found: error
-          retention-days: 30
-
-
-      # =========================================================
-      # 18. Upload dSYM
-      # =========================================================
-      - name: Upload dSYM
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-release-dsym
+          name: ppdeli-ios-ipa
           path: |
-            build/ios/archive/Runner.xcarchive/dSYMs/**
+            build/ios/ipa/*.ipa
+          if-no-files-found: error
+
+
+      # ---------------------------------------------------------
+      # 22. Upload dSYM
+      # ---------------------------------------------------------
+      - name: Upload dSYM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppdeli-ios-dsym
+          path: |
+            build/ios/archive/Runner.xcarchive/dSYMs/*.dSYM
+            build/ios/archive/Runner.xcarchive/dSYMs/*.dSYM.zip
           if-no-files-found: warn
-          retention-days: 30
 
 
-      # =========================================================
-      # 19. Cleanup
-      # =========================================================
-      - name: Cleanup signing data
+      # ---------------------------------------------------------
+      # 23. Cleanup
+      # ---------------------------------------------------------
+      - name: Cleanup signing files
         if: always()
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          set +e
 
           echo "Cleaning temporary signing files..."
 
-          rm -f "$RUNNER_TEMP/ios_distribution.p12"
-          rm -f "$RUNNER_TEMP/profile.mobileprovision"
-          rm -f "$RUNNER_TEMP/profile.plist"
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
 
-          if [ -f "$KEYCHAIN_PATH" ]; then
-            security delete-keychain "$KEYCHAIN_PATH" || true
-          fi
+          rm -f \
+            "$RUNNER_TEMP/ios_distribution.p12" \
+            "$RUNNER_TEMP/ppdeli2.mobileprovision" \
+            "$RUNNER_TEMP/profile.plist"
 
           echo "Cleanup completed."
