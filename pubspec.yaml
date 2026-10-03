@@ -1,7 +1,7 @@
 name: pickles_and_pies
 description: A Multi-vendor Food. Grocery, eCommerce, Pharmacy & Parcel service.
 publish_to: 'none' #
-version: 8.8.8+8
+version: 9.9.9+9
 
 environment:
   sdk: ^3.11.0
@@ -13,7 +13,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   get: ^4.7.3
   shared_preferences: ^2.5.4
-  connectivity_plus: ^7.0.0
+  connectivity_plus: ^6.1.5
   firebase_core: ^4.2.1
   firebase_messaging: ^16.0.4
   flutter_local_notifications: ^19.5.0
