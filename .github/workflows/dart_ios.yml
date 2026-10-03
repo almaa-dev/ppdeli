@@ -1,18 +1,13 @@
 name: Build iOS IPA
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
 
-  workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: ios-build-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   FLUTTER_VERSION: "3.44.8"
@@ -22,23 +17,21 @@ env:
 
 jobs:
   build-ios:
-    name: Build PPDELI iOS IPA
+    name: Build Signed iOS IPA
     runs-on: macos-14
     timeout-minutes: 60
 
     steps:
 
-      # ============================================================
-      # 1. CHECKOUT
-      # ============================================================
-
-      - name: Checkout Repository
+      # --------------------------------------------------
+      # 1. Checkout
+      # --------------------------------------------------
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # ============================================================
-      # 2. SETUP FLUTTER
-      # ============================================================
-
+      # --------------------------------------------------
+      # 2. Flutter
+      # --------------------------------------------------
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -46,93 +39,36 @@ jobs:
           channel: stable
           cache: true
 
-      # ============================================================
-      # 3. CHECK TOOLS
-      # ============================================================
-
-      - name: Check Flutter Xcode CocoaPods
+      # --------------------------------------------------
+      # 3. Flutter dependencies
+      # --------------------------------------------------
+      - name: Flutter Pub Get
         run: |
           set -e
-
-          echo "=========================================="
-          echo "Flutter"
-          echo "=========================================="
 
           flutter --version
-          dart --version
 
-          echo ""
-          echo "=========================================="
-          echo "Xcode"
-          echo "=========================================="
+          flutter config --no-enable-swift-package-manager || true
 
-          xcodebuild -version
+          flutter clean
+          flutter pub get
 
-          echo ""
-          echo "=========================================="
-          echo "CocoaPods"
-          echo "=========================================="
-
-          pod --version
-
-      # ============================================================
-      # 4. VERIFY PROJECT
-      # ============================================================
-
-      - name: Verify Flutter Project
+      # --------------------------------------------------
+      # 4. CocoaPods
+      # --------------------------------------------------
+      - name: Install CocoaPods
         run: |
           set -e
 
-          test -f pubspec.yaml
-          test -d ios
-          test -d ios/Runner.xcodeproj
-          test -f ios/Podfile
+          cd ios
 
-          echo "Flutter project detected."
-          echo "Bundle ID: $BUNDLE_ID"
-          echo "Team ID: $APPLE_TEAM_ID"
+          pod install --repo-update
 
-      # ============================================================
-      # 5. VERIFY SECRETS
-      # ============================================================
+          cd ..
 
-      - name: Verify Signing Secrets
-        env:
-          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          set -e
-
-          echo "Checking signing secrets..."
-
-          if [ -z "$IOS_CERTIFICATE_BASE64" ]; then
-            echo "ERROR: IOS_CERTIFICATE_BASE64 is empty."
-            exit 1
-          fi
-
-          if [ -z "$IOS_CERTIFICATE_PASSWORD" ]; then
-            echo "ERROR: IOS_CERTIFICATE_PASSWORD is empty."
-            exit 1
-          fi
-
-          if [ -z "$IOS_PROVISIONING_PROFILE_BASE64" ]; then
-            echo "ERROR: IOS_PROVISIONING_PROFILE_BASE64 is empty."
-            exit 1
-          fi
-
-          if [ -z "$KEYCHAIN_PASSWORD" ]; then
-            echo "ERROR: KEYCHAIN_PASSWORD is empty."
-            exit 1
-          fi
-
-          echo "All required signing secrets are present."
-
-      # ============================================================
-      # 6. PREPARE SIGNING DIRECTORY
-      # ============================================================
-
+      # --------------------------------------------------
+      # 5. Prepare signing directory
+      # --------------------------------------------------
       - name: Prepare Signing Files
         env:
           IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
@@ -142,136 +78,91 @@ jobs:
 
           mkdir -p "$RUNNER_TEMP/ppdeli-signing"
 
-          echo "Decoding Apple Distribution P12..."
-
-          printf '%s' "$IOS_CERTIFICATE_BASE64" \
-            | base64 --decode \
+          echo "$IOS_CERTIFICATE_BASE64" | base64 -D \
             > "$RUNNER_TEMP/ppdeli-signing/ios_distribution.p12"
 
-          echo "Decoding provisioning profile..."
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -D \
+            > "$RUNNER_TEMP/ppdeli-signing/profile.mobileprovision"
 
-          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" \
-            | base64 --decode \
-            > "$RUNNER_TEMP/ppdeli-signing/PPDELI_App_Store_Distribution.mobileprovision"
+          chmod 600 \
+            "$RUNNER_TEMP/ppdeli-signing/ios_distribution.p12" \
+            "$RUNNER_TEMP/ppdeli-signing/profile.mobileprovision"
 
-          echo ""
-          echo "Signing files created."
-
+          echo "Signing files:"
           ls -lh "$RUNNER_TEMP/ppdeli-signing"
 
-          echo ""
-          echo "Checking P12 file type..."
-
-          file "$RUNNER_TEMP/ppdeli-signing/ios_distribution.p12"
-
-          echo ""
-          echo "Checking provisioning profile..."
-
-          file "$RUNNER_TEMP/ppdeli-signing/PPDELI_App_Store_Distribution.mobileprovision"
-
-      # ============================================================
-      # 7. DISABLE FLUTTER SWIFT PACKAGE MANAGER
-      # ============================================================
-
-      - name: Disable Swift Package Manager
+      # --------------------------------------------------
+      # 6. Verify P12 BEFORE importing
+      # --------------------------------------------------
+      - name: Verify P12
+        env:
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
         run: |
           set -e
 
-          flutter config --no-enable-swift-package-manager || true
+          P12_FILE="$RUNNER_TEMP/ppdeli-signing/ios_distribution.p12"
 
-          flutter config
+          echo "Checking P12..."
 
-      # ============================================================
-      # 8. CLEAN PROJECT
-      # ============================================================
+          openssl pkcs12 \
+            -in "$P12_FILE" \
+            -noout \
+            -passin env:IOS_CERTIFICATE_PASSWORD
 
-      - name: Clean Flutter and iOS
+          echo "✅ P12 password verified successfully."
+
+      # --------------------------------------------------
+      # 7. Verify provisioning profile
+      # --------------------------------------------------
+      - name: Verify Provisioning Profile
         run: |
           set -e
 
-          flutter clean
+          PROFILE="$RUNNER_TEMP/ppdeli-signing/profile.mobileprovision"
+          PLIST="$RUNNER_TEMP/ppdeli-signing/profile.plist"
 
-          rm -rf build
-          rm -rf ios/Pods
-          rm -rf ios/.symlinks
-          rm -rf ios/Flutter/ephemeral
-          rm -f ios/Flutter/Generated.xcconfig
-          rm -f ios/Flutter/flutter_export_environment.sh
+          security cms \
+            -D \
+            -i "$PROFILE" \
+            > "$PLIST"
 
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
-          rm -rf ~/Library/Caches/org.carthage.CarthageKit
+          PROFILE_NAME=$( /usr/libexec/PlistBuddy \
+            -c "Print :Name" "$PLIST" )
 
-          echo "Clean completed."
+          TEAM_ID=$( /usr/libexec/PlistBuddy \
+            -c "Print :TeamIdentifier:0" "$PLIST" )
 
-      # ============================================================
-      # 9. FLUTTER PUB GET
-      # ============================================================
+          APP_ID=$( /usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:application-identifier" "$PLIST" )
 
-      - name: Flutter Pub Get
-        run: |
-          set -e
+          UUID=$( /usr/libexec/PlistBuddy \
+            -c "Print :UUID" "$PLIST" )
 
-          flutter pub get
+          echo "Profile Name: $PROFILE_NAME"
+          echo "Team ID: $TEAM_ID"
+          echo "App ID: $APP_ID"
+          echo "UUID: $UUID"
 
-          echo ""
-          echo "Checking Generated.xcconfig..."
+          test "$PROFILE_NAME" = "$PROFILE_NAME"
 
-          test -f ios/Flutter/Generated.xcconfig
+          test "$TEAM_ID" = "${{ env.APPLE_TEAM_ID }}"
+          test "$APP_ID" = "${{ env.APPLE_TEAM_ID }}.${{ env.BUNDLE_ID }}"
 
-          ls -lh ios/Flutter/Generated.xcconfig
+          echo "✅ Provisioning profile verified."
 
-      # ============================================================
-      # 10. POD INSTALL
-      # ============================================================
-
-      - name: Install iOS Pods
-        working-directory: ios
-        run: |
-          set -e
-
-          pod deintegrate || true
-
-          rm -rf Pods
-          rm -rf .symlinks
-
-          echo "Installing CocoaPods dependencies..."
-
-          pod install --repo-update
-
-          test -d Pods
-          test -d .symlinks
-
-          echo "Pods installed successfully."
-
-      # ============================================================
-      # 11. CREATE BUILD DIRECTORIES
-      # ============================================================
-
-      - name: Prepare Build Directories
-        run: |
-          set -e
-
-          mkdir -p build
-          mkdir -p build/ios
-          mkdir -p build/ios/SourcePackages
-
-          echo "Build directories prepared."
-
-      # ============================================================
-      # 12. CREATE KEYCHAIN
-      # ============================================================
-
-      - name: Create Signing Keychain
+      # --------------------------------------------------
+      # 8. Create temporary keychain
+      # --------------------------------------------------
+      - name: Create Keychain
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
         run: |
           set -e
 
           KEYCHAIN_PATH="$RUNNER_TEMP/ppdeli-signing.keychain-db"
 
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-
-          echo "Creating temporary keychain..."
 
           security create-keychain \
             -p "$KEYCHAIN_PASSWORD" \
@@ -292,48 +183,10 @@ jobs:
           security default-keychain \
             -s "$KEYCHAIN_PATH"
 
-          echo "Keychain created successfully."
-
-      # ============================================================
-      # 13. VERIFY P12 PASSWORD BEFORE IMPORT
-      # ============================================================
-
-      - name: Verify P12
-        env:
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-        run: |
-          set -e
-
-          P12_FILE="$RUNNER_TEMP/ppdeli-signing/ios_distribution.p12"
-
-          echo "Testing P12 password..."
-
-          openssl pkcs12 \
-            -info \
-            -in "$P12_FILE" \
-            -noout \
-            -passin "pass:$IOS_CERTIFICATE_PASSWORD"
-
-          echo ""
-          echo "P12 verification successful."
-
-      # ============================================================
-      # 14. IMPORT APPLE DISTRIBUTION CERTIFICATE
-      # ============================================================
-
-      - name: Import Apple Distribution Certificate
-        env:
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          set -e
-
-          P12_FILE="$RUNNER_TEMP/ppdeli-signing/ios_distribution.p12"
-
           echo "Importing Apple Distribution certificate..."
 
           security import \
-            "$P12_FILE" \
+            "$RUNNER_TEMP/ppdeli-signing/ios_distribution.p12" \
             -k "$KEYCHAIN_PATH" \
             -P "$IOS_CERTIFICATE_PASSWORD" \
             -f pkcs12 \
@@ -350,7 +203,6 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
 
-          echo ""
           echo "Available signing identities:"
 
           security find-identity \
@@ -358,149 +210,40 @@ jobs:
             -p codesigning \
             "$KEYCHAIN_PATH"
 
-      # ============================================================
-      # 15. VERIFY APPLE DISTRIBUTION IDENTITY
-      # ============================================================
-
-      - name: Verify Apple Distribution Certificate
-        run: |
-          set -e
-
-          echo "Searching for Apple Distribution identity..."
-
-          security find-identity \
-            -v \
-            -p codesigning \
-            "$KEYCHAIN_PATH"
-
-          IDENTITY_COUNT=$(
-            security find-identity \
-              -v \
-              -p codesigning \
-              "$KEYCHAIN_PATH" |
-              grep -c "Apple Distribution" || true
-          )
-
-          echo ""
-          echo "Apple Distribution identities: $IDENTITY_COUNT"
-
-          if [ "$IDENTITY_COUNT" -lt 1 ]; then
-            echo "ERROR: Apple Distribution certificate not found."
-            exit 1
-          fi
-
-          echo "Apple Distribution certificate is available."
-
-      # ============================================================
-      # 16. READ PROVISIONING PROFILE
-      # ============================================================
-
-      - name: Read Provisioning Profile
-        run: |
-          set -e
-
-          PROFILE_FILE="$RUNNER_TEMP/ppdeli-signing/PPDELI_App_Store_Distribution.mobileprovision"
-          PROFILE_PLIST="$RUNNER_TEMP/ppdeli-profile.plist"
-
-          security cms \
-            -D \
-            -i "$PROFILE_FILE" \
-            > "$PROFILE_PLIST"
-
-          PROFILE_UUID=$(
-            /usr/libexec/PlistBuddy \
-            -c "Print :UUID" \
-            "$PROFILE_PLIST"
-          )
-
-          PROFILE_NAME_FROM_FILE=$(
-            /usr/libexec/PlistBuddy \
-            -c "Print :Name" \
-            "$PROFILE_PLIST"
-          )
-
-          PROFILE_TEAM_ID=$(
-            /usr/libexec/PlistBuddy \
-            -c "Print :TeamIdentifier:0" \
-            "$PROFILE_PLIST"
-          )
-
-          PROFILE_APP_ID=$(
-            /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:application-identifier" \
-            "$PROFILE_PLIST"
-          )
-
-          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
-
-          echo ""
-          echo "=========================================="
-          echo "Provisioning Profile"
-          echo "=========================================="
-          echo "Name:    $PROFILE_NAME_FROM_FILE"
-          echo "UUID:    $PROFILE_UUID"
-          echo "Team ID: $PROFILE_TEAM_ID"
-          echo "App ID:  $PROFILE_APP_ID"
-          echo "=========================================="
-
-          EXPECTED_APP_ID="${APPLE_TEAM_ID}.${BUNDLE_ID}"
-
-          if [ "$PROFILE_NAME_FROM_FILE" != "$PROFILE_NAME" ]; then
-            echo "ERROR: Provisioning Profile name mismatch."
-            echo "Expected: $PROFILE_NAME"
-            echo "Found:    $PROFILE_NAME_FROM_FILE"
-            exit 1
-          fi
-
-          if [ "$PROFILE_TEAM_ID" != "$APPLE_TEAM_ID" ]; then
-            echo "ERROR: Team ID mismatch."
-            echo "Expected: $APPLE_TEAM_ID"
-            echo "Found:    $PROFILE_TEAM_ID"
-            exit 1
-          fi
-
-          if [ "$PROFILE_APP_ID" != "$EXPECTED_APP_ID" ]; then
-            echo "ERROR: Application ID mismatch."
-            echo "Expected: $EXPECTED_APP_ID"
-            echo "Found:    $PROFILE_APP_ID"
-            exit 1
-          fi
-
-          echo ""
-          echo "Provisioning profile is correct."
-
-      # ============================================================
-      # 17. INSTALL PROVISIONING PROFILE
-      # ============================================================
-
+      # --------------------------------------------------
+      # 9. Install provisioning profile
+      # --------------------------------------------------
       - name: Install Provisioning Profile
         run: |
           set -e
-
-          PROFILE_FILE="$RUNNER_TEMP/ppdeli-signing/PPDELI_App_Store_Distribution.mobileprovision"
 
           PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
 
           mkdir -p "$PROFILE_DIR"
 
-          cp \
-            "$PROFILE_FILE" \
-            "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+          PROFILE="$RUNNER_TEMP/ppdeli-signing/profile.mobileprovision"
 
-          echo "Installed provisioning profile:"
-          ls -lh "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+          UUID=$( /usr/libexec/PlistBuddy \
+            -c "Print :UUID" \
+            "$RUNNER_TEMP/ppdeli-signing/profile.plist" )
 
-      # ============================================================
-      # 18. CREATE EXPORT OPTIONS
-      # ============================================================
+          cp "$PROFILE" \
+            "$PROFILE_DIR/$UUID.mobileprovision"
 
+          echo "Installed profile:"
+          echo "$UUID.mobileprovision"
+
+      # --------------------------------------------------
+      # 10. Create ExportOptions.plist
+      # --------------------------------------------------
       - name: Create ExportOptions.plist
         run: |
           set -e
 
-          cat > ios/ExportOptions.plist <<PLIST
+          cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>method</key>
@@ -523,288 +266,141 @@ jobs:
 
               <key>uploadSymbols</key>
               <true/>
-
-              <key>compileBitcode</key>
-              <false/>
-
-              <key>destination</key>
-              <string>export</string>
           </dict>
           </plist>
-          PLIST
-
-          echo "Checking ExportOptions.plist..."
+          EOF
 
           plutil -lint ios/ExportOptions.plist
 
-          echo ""
-          plutil -p ios/ExportOptions.plist
+          echo "ExportOptions.plist:"
+          cat ios/ExportOptions.plist
 
-      # ============================================================
-      # 19. VERIFY BUNDLE ID
-      # ============================================================
-
-      - name: Verify Bundle Identifier
+      # --------------------------------------------------
+      # 11. Build unsigned archive
+      # --------------------------------------------------
+      - name: Build Unsigned Archive
         run: |
           set -e
 
-          echo "Bundle identifiers in Xcode project:"
+          flutter build ipa \
+            --release \
+            --no-codesign
 
-          grep -n \
-            "PRODUCT_BUNDLE_IDENTIFIER" \
-            ios/Runner.xcodeproj/project.pbxproj \
-            || true
+          echo "Archive files:"
 
-          echo ""
-          echo "Expected:"
-          echo "$BUNDLE_ID"
+          find build/ios/archive \
+            -maxdepth 2 \
+            -name "*.xcarchive" \
+            -print
 
-          if ! grep -q "$BUNDLE_ID" ios/Runner.xcodeproj/project.pbxproj; then
-            echo ""
-            echo "ERROR: Expected Bundle ID was not found."
-            exit 1
-          fi
-
-      # ============================================================
-      # 20. FORCE MANUAL SIGNING
-      # ============================================================
-
-      - name: Verify Manual Signing Configuration
-        run: |
-          set -e
-
-          echo "Checking signing configuration..."
-
-          grep -n \
-            -E "CODE_SIGN_STYLE|DEVELOPMENT_TEAM|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_IDENTITY" \
-            ios/Runner.xcodeproj/project.pbxproj \
-            || true
-
-          echo ""
-          echo "Signing will be controlled by ExportOptions.plist."
-          echo "Team: $APPLE_TEAM_ID"
-          echo "Bundle ID: $BUNDLE_ID"
-
-      # ============================================================
-      # 21. FINAL FLUTTER PREPARATION
-      # ============================================================
-
-      - name: Final Flutter Preparation
-        run: |
-          set -e
-
-          flutter pub get
-
-          test -f ios/Flutter/Generated.xcconfig
-          test -d ios/Pods
-          test -f ios/Runner.xcworkspace/contents.xcworkspacedata
-
-          mkdir -p build/ios/SourcePackages
-
-          echo "Final preparation completed."
-
-      # ============================================================
-      # 22. BUILD IPA
-      # ============================================================
-
-      - name: Build Release IPA
+      # --------------------------------------------------
+      # 12. Export and sign IPA
+      # --------------------------------------------------
+      - name: Sign and Export IPA
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           set -e
 
-          echo "=========================================="
-          echo "PPDELI iOS BUILD"
-          echo "=========================================="
-
-          echo "Bundle ID : $BUNDLE_ID"
-          echo "Team ID   : $APPLE_TEAM_ID"
-          echo "Profile   : $PROFILE_NAME"
-          echo ""
-
-          security unlock-keychain \
-            -p "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN_PATH"
-
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN_PATH"
-
-          echo ""
-          echo "Signing identities:"
-
-          security find-identity \
-            -v \
-            -p codesigning \
-            "$KEYCHAIN_PATH"
-
-          echo ""
-          echo "Starting Flutter IPA build..."
-
-          flutter build ipa \
-            --release \
-            --export-options-plist=ios/ExportOptions.plist \
-            -v
-
-      # ============================================================
-      # 23. LOCATE IPA
-      # ============================================================
-
-      - name: Locate IPA
-        run: |
-          set -e
-
-          echo "Searching for IPA..."
-
-          find build \
-            -type f \
-            -name "*.ipa" \
-            -print
-
-          echo ""
-          echo "Searching for XCArchive..."
-
-          find build \
-            -type d \
+          ARCHIVE=$(find build/ios/archive \
+            -maxdepth 1 \
             -name "*.xcarchive" \
-            -print
+            -print -quit)
 
-      # ============================================================
-      # 24. VERIFY IPA
-      # ============================================================
+          if [ -z "$ARCHIVE" ]; then
+            echo "❌ XCArchive not found."
+            exit 1
+          fi
 
+          echo "Archive:"
+          echo "$ARCHIVE"
+
+          rm -rf build/ios/ipa
+
+          mkdir -p build/ios/ipa
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$ARCHIVE" \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -exportPath build/ios/ipa \
+            -allowProvisioningUpdates
+
+      # --------------------------------------------------
+      # 13. Verify IPA
+      # --------------------------------------------------
       - name: Verify IPA
         run: |
           set -e
 
-          IPA_FILE=$(find build -type f -name "*.ipa" | head -n 1)
+          IPA=$(find build/ios/ipa \
+            -maxdepth 1 \
+            -name "*.ipa" \
+            -print -quit)
 
-          if [ -z "$IPA_FILE" ]; then
-            echo "ERROR: No IPA file was generated."
+          if [ -z "$IPA" ]; then
+            echo "❌ IPA was not created."
             exit 1
           fi
 
           echo "IPA:"
-          echo "$IPA_FILE"
+          echo "$IPA"
 
-          echo ""
-          echo "IPA size:"
-          ls -lh "$IPA_FILE"
+          ls -lh "$IPA"
 
-          echo ""
-          echo "Testing IPA archive..."
-
-          unzip -t "$IPA_FILE" >/dev/null
-
-          echo "IPA archive is valid."
-
-      # ============================================================
-      # 25. INSPECT IPA
-      # ============================================================
-
-      - name: Inspect IPA
-        run: |
-          set -e
-
-          IPA_FILE=$(find build -type f -name "*.ipa" | head -n 1)
+          rm -rf "$RUNNER_TEMP/ipa-check"
 
           mkdir -p "$RUNNER_TEMP/ipa-check"
 
-          unzip -q "$IPA_FILE" \
+          unzip -q "$IPA" \
             -d "$RUNNER_TEMP/ipa-check"
 
-          APP_PATH=$(find \
-            "$RUNNER_TEMP/ipa-check/Payload" \
-            -maxdepth 1 \
-            -type d \
-            -name "*.app" |
-            head -n 1)
+          APP="$RUNNER_TEMP/ipa-check/Payload/Runner.app"
 
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: .app not found inside IPA."
+          if [ ! -d "$APP" ]; then
+            echo "❌ Runner.app not found."
             exit 1
           fi
 
-          echo "Application:"
-          echo "$APP_PATH"
-
-          echo ""
-          echo "Bundle identifier:"
-
+          echo "Bundle ID:"
           /usr/libexec/PlistBuddy \
             -c "Print :CFBundleIdentifier" \
-            "$APP_PATH/Info.plist"
+            "$APP/Info.plist"
 
-          echo ""
-          echo "Version:"
+          echo "Code signing information:"
 
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleShortVersionString" \
-            "$APP_PATH/Info.plist"
+          codesign \
+            -dv \
+            --verbose=4 \
+            "$APP" \
+            2>&1 | grep -E \
+            "Authority=|TeamIdentifier=|Identifier=" || true
 
-          echo ""
-          echo "Build number:"
+          echo "✅ IPA verification completed."
 
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleVersion" \
-            "$APP_PATH/Info.plist"
-
-      # ============================================================
-      # 26. UPLOAD IPA
-      # ============================================================
-
+      # --------------------------------------------------
+      # 14. Upload IPA
+      # --------------------------------------------------
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ppdeli-ios-release-ipa
-          path: build/**/*.ipa
+          name: ppdeli-ios-ipa
+          path: build/ios/ipa/*.ipa
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
-      # ============================================================
-      # 27. UPLOAD dSYM
-      # ============================================================
-
-      - name: Upload dSYM Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ppdeli-ios-dsym
-          path: |
-            build/**/*.xcarchive/dSYMs/**
-            build/ios/archive/**/*.dSYM/**
-          if-no-files-found: warn
-          retention-days: 7
-
-      # ============================================================
-      # 28. SUCCESS
-      # ============================================================
-
-      - name: Build Success
-        if: success()
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "PPDELI iOS BUILD SUCCESS"
-          echo "=========================================="
-          echo ""
-          echo "Bundle ID : $BUNDLE_ID"
-          echo "Team ID   : $APPLE_TEAM_ID"
-          echo "Profile   : $PROFILE_NAME"
-          echo ""
-          echo "IPA artifact:"
-          echo "ppdeli-ios-release-ipa"
-          echo ""
-          echo "=========================================="
-
-      # ============================================================
-      # 29. CLEANUP
-      # ============================================================
-
-      - name: Cleanup Signing Keychain
+      # --------------------------------------------------
+      # 15. Cleanup
+      # --------------------------------------------------
+      - name: Cleanup
         if: always()
         run: |
+          set +e
+
           if [ -n "${KEYCHAIN_PATH:-}" ]; then
             security delete-keychain "$KEYCHAIN_PATH" || true
           fi
+
+          rm -rf "$RUNNER_TEMP/ppdeli-signing"
+
+          echo "Cleanup completed."
