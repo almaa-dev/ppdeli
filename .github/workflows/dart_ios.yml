@@ -25,7 +25,8 @@ jobs:
 
     name: Build PPDELI iOS IPA
 
-    runs-on: macos-14
+    # macOS 15 gives us newer Xcode versions than macOS 14.
+    runs-on: macos-15
 
     timeout-minutes: 60
 
@@ -40,7 +41,62 @@ jobs:
 
 
       # =========================================================
-      # 2. SETUP FLUTTER
+      # 2. SELECT XCODE
+      # =========================================================
+
+      - name: Select Xcode
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "AVAILABLE XCODE VERSIONS"
+          echo "=========================================="
+
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+
+          echo "=========================================="
+          echo "SELECTING XCODE"
+          echo "=========================================="
+
+          # Prefer Xcode 16.4 if available.
+          if [ -d "/Applications/Xcode_16.4.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_16.4.app/Contents/Developer"
+
+          # Otherwise use Xcode 16.3.
+          elif [ -d "/Applications/Xcode_16.3.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_16.3.app/Contents/Developer"
+
+          # Otherwise use Xcode 16.2.
+          elif [ -d "/Applications/Xcode_16.2.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_16.2.app/Contents/Developer"
+
+          # Otherwise use the default Xcode installed by GitHub.
+          else
+            echo "No explicit Xcode 16.x installation found."
+            echo "Using default Xcode."
+          fi
+
+          echo "=========================================="
+          echo "XCODE VERSION"
+          echo "=========================================="
+
+          xcodebuild -version
+
+          echo "=========================================="
+          echo "SWIFT VERSION"
+          echo "=========================================="
+
+          swift --version
+
+          echo "=========================================="
+          echo "XCODE PATH"
+          echo "=========================================="
+
+          xcode-select -p
+
+
+      # =========================================================
+      # 3. SETUP FLUTTER
       # =========================================================
 
       - name: Setup Flutter
@@ -52,7 +108,7 @@ jobs:
 
 
       # =========================================================
-      # 3. FLUTTER SETUP
+      # 4. FLUTTER SETUP
       # =========================================================
 
       - name: Flutter Setup
@@ -66,7 +122,7 @@ jobs:
           flutter --version
 
           echo "=========================================="
-          echo "DISABLE SWIFT PACKAGE MANAGER"
+          echo "FLUTTER CONFIG"
           echo "=========================================="
 
           flutter config --no-enable-swift-package-manager || true
@@ -77,15 +133,9 @@ jobs:
 
           flutter clean
 
-          echo "=========================================="
-          echo "FLUTTER PUB GET"
-          echo "=========================================="
-
-          flutter pub get
-
 
       # =========================================================
-      # 4. CHECK SIGNING FILES
+      # 5. CHECK SIGNING FILES
       # =========================================================
 
       - name: Check Apple Signing Files
@@ -116,28 +166,148 @@ jobs:
 
 
       # =========================================================
-      # 5. INSTALL COCOAPODS
+      # 6. FLUTTER PUB GET
       # =========================================================
 
-      - name: Install CocoaPods
+      - name: Flutter Pub Get
         run: |
           set -e
 
           echo "=========================================="
-          echo "INSTALLING COCOAPODS"
+          echo "FLUTTER PUB GET"
           echo "=========================================="
 
-          cd ios
-
-          pod install --repo-update
-
-          cd ..
-
-          echo "✅ CocoaPods completed."
+          flutter pub get
 
 
       # =========================================================
-      # 6. PREPARE SIGNING DIRECTORY
+      # 7. PREPARE PODFILE FOR FIREBASE SWIFT COMPATIBILITY
+      # =========================================================
+
+      - name: Configure Firebase Swift Compatibility
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "CONFIGURING FIREBASE SWIFT COMPATIBILITY"
+          echo "=========================================="
+
+          PODFILE="ios/Podfile"
+
+          if [ ! -f "$PODFILE" ]; then
+            echo "❌ Podfile not found"
+            exit 1
+          fi
+
+          cp "$PODFILE" "$RUNNER_TEMP/Podfile.backup"
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("ios/Podfile")
+          text = path.read_text()
+
+          marker = "# PPDELI_FIREBASE_SWIFT_COMPATIBILITY"
+
+          if marker not in text:
+
+              block = r'''
+
+          # PPDELI_FIREBASE_SWIFT_COMPATIBILITY
+          #
+          # FirebaseCoreInternal uses Swift features such as scoped imports
+          # and sending. Enable the required Swift compiler feature for
+          # Firebase targets when using a compatible Xcode/Swift toolchain.
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+
+              if [
+                'FirebaseCoreInternal',
+                'FirebaseSessions'
+              ].include?(target.name)
+
+                target.build_configurations.each do |config|
+
+                  flags = config.build_settings['OTHER_SWIFT_FLAGS']
+
+                  if flags.nil?
+                    flags = ['$(inherited)']
+                  elsif flags.is_a?(String)
+                    flags = [flags]
+                  end
+
+                  unless flags.include?('-enable-experimental-feature')
+                    flags << '-enable-experimental-feature'
+                  end
+
+                  unless flags.include?('AccessLevelOnImport')
+                    flags << 'AccessLevelOnImport'
+                  end
+
+                  config.build_settings['OTHER_SWIFT_FLAGS'] = flags
+
+                end
+              end
+
+            end
+          end
+          '''
+
+              # If Podfile already contains a post_install block,
+              # insert the Firebase settings inside it.
+              if "post_install do |installer|" in text:
+
+                  old = "post_install do |installer|"
+                  replacement = """post_install do |installer|
+
+            # PPDELI_FIREBASE_SWIFT_COMPATIBILITY
+            installer.pods_project.targets.each do |target|
+              if ['FirebaseCoreInternal', 'FirebaseSessions'].include?(target.name)
+                target.build_configurations.each do |config|
+                  flags = config.build_settings['OTHER_SWIFT_FLAGS']
+
+                  if flags.nil?
+                    flags = ['$(inherited)']
+                  elsif flags.is_a?(String)
+                    flags = [flags]
+                  end
+
+                  unless flags.include?('-enable-experimental-feature')
+                    flags << '-enable-experimental-feature'
+                  end
+
+                  unless flags.include?('AccessLevelOnImport')
+                    flags << 'AccessLevelOnImport'
+                  end
+
+                  config.build_settings['OTHER_SWIFT_FLAGS'] = flags
+                end
+              end
+            end
+          """
+
+                  text = text.replace(old, replacement, 1)
+
+              else:
+                  text += block
+
+              path.write_text(text)
+
+          print("Podfile updated for Firebase Swift compatibility.")
+          PY
+
+          echo "=========================================="
+          echo "PODFILE FIREBASE SETTINGS"
+          echo "=========================================="
+
+          grep -n -A60 -B5 \
+            "PPDELI_FIREBASE_SWIFT_COMPATIBILITY" \
+            "$PODFILE" || true
+
+
+      # =========================================================
+      # 8. PREPARE SIGNING DIRECTORY
       # =========================================================
 
       - name: Prepare Signing Files
@@ -170,7 +340,7 @@ jobs:
 
 
       # =========================================================
-      # 7. VERIFY ORIGINAL P12
+      # 9. VERIFY ORIGINAL P12
       # =========================================================
 
       - name: Verify Original P12
@@ -196,7 +366,7 @@ jobs:
 
 
       # =========================================================
-      # 8. REBUILD P12 FOR macOS KEYCHAIN
+      # 10. REBUILD P12 FOR macOS KEYCHAIN
       # =========================================================
 
       - name: Rebuild P12 for macOS
@@ -253,7 +423,7 @@ jobs:
 
 
       # =========================================================
-      # 9. VERIFY PROVISIONING PROFILE
+      # 11. VERIFY PROVISIONING PROFILE
       # =========================================================
 
       - name: Verify Provisioning Profile
@@ -272,7 +442,7 @@ jobs:
             -i "$PROFILE" \
             > "$PLIST"
 
-          PROFILE_NAME=$(
+          ACTUAL_PROFILE_NAME=$(
             /usr/libexec/PlistBuddy \
             -c "Print :Name" \
             "$PLIST"
@@ -296,7 +466,8 @@ jobs:
             "$PLIST"
           )
 
-          echo "Profile Name: $PROFILE_NAME"
+          echo "Profile Name: $ACTUAL_PROFILE_NAME"
+          echo "Expected Name: $PROFILE_NAME"
           echo "Team ID: $TEAM_ID"
           echo "App ID: $APP_ID"
           echo "UUID: $UUID"
@@ -305,8 +476,10 @@ jobs:
           echo "CHECKING PROFILE"
           echo "=========================================="
 
-          if [ "$PROFILE_NAME" != "$PROFILE_NAME" ]; then
+          if [ "$ACTUAL_PROFILE_NAME" != "$PROFILE_NAME" ]; then
             echo "❌ Invalid profile name"
+            echo "Expected: $PROFILE_NAME"
+            echo "Found: $ACTUAL_PROFILE_NAME"
             exit 1
           fi
 
@@ -332,7 +505,7 @@ jobs:
 
 
       # =========================================================
-      # 10. CREATE TEMPORARY KEYCHAIN
+      # 12. CREATE TEMPORARY KEYCHAIN
       # =========================================================
 
       - name: Create Temporary Keychain
@@ -374,7 +547,7 @@ jobs:
 
 
       # =========================================================
-      # 11. IMPORT REBUILT P12
+      # 13. IMPORT APPLE DISTRIBUTION CERTIFICATE
       # =========================================================
 
       - name: Import Apple Distribution Certificate
@@ -392,13 +565,6 @@ jobs:
             echo "❌ Rebuilt P12 not found"
             exit 1
           fi
-
-          echo "P12 file:"
-          ls -lh "$MACOS_P12"
-
-          echo "=========================================="
-          echo "SECURITY IMPORT"
-          echo "=========================================="
 
           security import \
             "$MACOS_P12" \
@@ -435,7 +601,7 @@ jobs:
 
 
       # =========================================================
-      # 12. INSTALL PROVISIONING PROFILE
+      # 14. INSTALL PROVISIONING PROFILE
       # =========================================================
 
       - name: Install Provisioning Profile
@@ -461,7 +627,7 @@ jobs:
 
 
       # =========================================================
-      # 13. CREATE EXPORT OPTIONS
+      # 15. CREATE EXPORT OPTIONS
       # =========================================================
 
       - name: Create ExportOptions.plist
@@ -513,7 +679,87 @@ jobs:
 
 
       # =========================================================
-      # 14. CHECK XCODE SIGNING SETTINGS
+      # 16. INSTALL COCOAPODS CLEANLY
+      # =========================================================
+
+      - name: Install CocoaPods Cleanly
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "CLEANING COCOAPODS"
+          echo "=========================================="
+
+          cd ios
+
+          rm -rf Pods
+          rm -f Podfile.lock
+
+          pod deintegrate || true
+
+          cd ..
+
+          rm -rf ~/Library/Caches/CocoaPods
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+
+          echo "=========================================="
+          echo "INSTALLING COCOAPODS"
+          echo "=========================================="
+
+          cd ios
+
+          pod repo update
+          pod install --repo-update
+
+          cd ..
+
+          echo "=========================================="
+          echo "CHECKING FIREBASE PODS"
+          echo "=========================================="
+
+          grep -A5 -B2 \
+            "FirebaseCoreInternal" \
+            ios/Podfile.lock || true
+
+          echo "=========================================="
+          echo "✅ COCOAPODS INSTALL COMPLETE"
+          echo "=========================================="
+
+
+      # =========================================================
+      # 17. VERIFY POD SWIFT FLAGS
+      # =========================================================
+
+      - name: Verify Firebase Swift Flags
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "VERIFYING FIREBASE SWIFT FLAGS"
+          echo "=========================================="
+
+          grep -R \
+            "AccessLevelOnImport" \
+            ios/Pods/Target\ Support\ Files \
+            2>/dev/null \
+            | head -50 \
+            || true
+
+          echo "=========================================="
+          echo "XCODE VERSION"
+          echo "=========================================="
+
+          xcodebuild -version
+
+          echo "=========================================="
+          echo "SWIFT VERSION"
+          echo "=========================================="
+
+          swift --version
+
+
+      # =========================================================
+      # 18. CHECK XCODE SIGNING SETTINGS
       # =========================================================
 
       - name: Check Xcode Signing
@@ -535,7 +781,7 @@ jobs:
 
 
       # =========================================================
-      # 15. BUILD UNSIGNED ARCHIVE
+      # 19. BUILD UNSIGNED XCARCHIVE
       # =========================================================
 
       - name: Build Unsigned XCArchive
@@ -565,7 +811,7 @@ jobs:
 
 
       # =========================================================
-      # 16. EXPORT SIGNED IPA
+      # 20. EXPORT SIGNED IPA
       # =========================================================
 
       - name: Sign and Export IPA
@@ -611,7 +857,7 @@ jobs:
 
 
       # =========================================================
-      # 17. VERIFY IPA
+      # 21. VERIFY IPA
       # =========================================================
 
       - name: Verify IPA
@@ -683,12 +929,39 @@ jobs:
             || true
 
           echo "=========================================="
+          echo "VERIFYING EMBEDDED PROVISIONING PROFILE"
+          echo "=========================================="
+
+          if [ ! -f "$APP/embedded.mobileprovision" ]; then
+            echo "❌ embedded.mobileprovision NOT FOUND"
+            exit 1
+          fi
+
+          security cms \
+            -D \
+            -i "$APP/embedded.mobileprovision" \
+            > "$CHECK/embedded.plist"
+
+          EMBEDDED_APP_ID=$(
+            /usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:application-identifier" \
+            "$CHECK/embedded.plist"
+          )
+
+          echo "Embedded App ID: $EMBEDDED_APP_ID"
+
+          if [ "$EMBEDDED_APP_ID" != "${APPLE_TEAM_ID}.${BUNDLE_ID}" ]; then
+            echo "❌ WRONG EMBEDDED APPLICATION IDENTIFIER"
+            exit 1
+          fi
+
+          echo "=========================================="
           echo "✅ IPA VERIFIED SUCCESSFULLY"
           echo "=========================================="
 
 
       # =========================================================
-      # 18. UPLOAD IPA
+      # 22. UPLOAD IPA
       # =========================================================
 
       - name: Upload IPA Artifact
@@ -701,7 +974,7 @@ jobs:
 
 
       # =========================================================
-      # 19. CLEANUP
+      # 23. CLEANUP
       # =========================================================
 
       - name: Cleanup
