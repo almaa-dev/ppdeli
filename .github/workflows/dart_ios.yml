@@ -25,7 +25,7 @@ jobs:
 
     name: Build PPDELI iOS IPA
 
-    runs-on: macos-15
+    runs-on: macos-26
 
     timeout-minutes: 60
 
