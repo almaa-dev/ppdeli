@@ -25,7 +25,6 @@ jobs:
 
     name: Build PPDELI iOS IPA
 
-    # macOS 15 gives us newer Xcode versions than macOS 14.
     runs-on: macos-15
 
     timeout-minutes: 60
@@ -58,19 +57,15 @@ jobs:
           echo "SELECTING XCODE"
           echo "=========================================="
 
-          # Prefer Xcode 16.4 if available.
           if [ -d "/Applications/Xcode_16.4.app" ]; then
             sudo xcode-select -s "/Applications/Xcode_16.4.app/Contents/Developer"
 
-          # Otherwise use Xcode 16.3.
           elif [ -d "/Applications/Xcode_16.3.app" ]; then
             sudo xcode-select -s "/Applications/Xcode_16.3.app/Contents/Developer"
 
-          # Otherwise use Xcode 16.2.
           elif [ -d "/Applications/Xcode_16.2.app" ]; then
             sudo xcode-select -s "/Applications/Xcode_16.2.app/Contents/Developer"
 
-          # Otherwise use the default Xcode installed by GitHub.
           else
             echo "No explicit Xcode 16.x installation found."
             echo "Using default Xcode."
@@ -254,11 +249,10 @@ jobs:
           end
           '''
 
-              # If Podfile already contains a post_install block,
-              # insert the Firebase settings inside it.
               if "post_install do |installer|" in text:
 
                   old = "post_install do |installer|"
+
                   replacement = """post_install do |installer|
 
             # PPDELI_FIREBASE_SWIFT_COMPATIBILITY
@@ -496,6 +490,8 @@ jobs:
             echo "Found: $APP_ID"
             exit 1
           fi
+
+          PROFILE_UUID="$UUID"
 
           echo "PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
 
@@ -961,7 +957,105 @@ jobs:
 
 
       # =========================================================
-      # 22. UPLOAD IPA
+      # 22. UPLOAD IPA TO APP STORE CONNECT
+      # =========================================================
+
+      - name: Upload IPA to App Store Connect
+        env:
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "UPLOADING IPA TO APP STORE CONNECT"
+          echo "=========================================="
+
+          IPA=$(
+            find build/ios/ipa \
+            -maxdepth 1 \
+            -name "*.ipa" \
+            -print -quit
+          )
+
+          if [ -z "$IPA" ]; then
+            echo "❌ IPA NOT FOUND"
+            exit 1
+          fi
+
+          echo "IPA:"
+          ls -lh "$IPA"
+
+          if [ -z "$APPSTORE_ISSUER_ID" ]; then
+            echo "❌ APPSTORE_ISSUER_ID SECRET IS EMPTY"
+            exit 1
+          fi
+
+          if [ -z "$APPSTORE_KEY_ID" ]; then
+            echo "❌ APPSTORE_KEY_ID SECRET IS EMPTY"
+            exit 1
+          fi
+
+          if [ -z "$APPSTORE_PRIVATE_KEY" ]; then
+            echo "❌ APPSTORE_PRIVATE_KEY SECRET IS EMPTY"
+            exit 1
+          fi
+
+          echo "=========================================="
+          echo "CREATING APP STORE CONNECT API KEY"
+          echo "=========================================="
+
+          API_KEY_DIR="$HOME/.appstoreconnect/private_keys"
+
+          mkdir -p "$API_KEY_DIR"
+
+          API_KEY_FILE="$API_KEY_DIR/AuthKey_${APPSTORE_KEY_ID}.p8"
+
+          printf '%s\n' "$APPSTORE_PRIVATE_KEY" > "$API_KEY_FILE"
+
+          chmod 600 "$API_KEY_FILE"
+
+          if [ ! -s "$API_KEY_FILE" ]; then
+            echo "❌ API KEY FILE IS EMPTY"
+            exit 1
+          fi
+
+          echo "API Key prepared."
+
+          echo "=========================================="
+          echo "VALIDATING IPA WITH APP STORE CONNECT"
+          echo "=========================================="
+
+          xcrun altool \
+            --validate-app \
+            --type ios \
+            --file "$IPA" \
+            --apiKey "$APPSTORE_KEY_ID" \
+            --apiIssuer "$APPSTORE_ISSUER_ID"
+
+          echo "=========================================="
+          echo "VALIDATION SUCCESSFUL"
+          echo "=========================================="
+
+          echo "=========================================="
+          echo "UPLOADING IPA"
+          echo "=========================================="
+
+          xcrun altool \
+            --upload-app \
+            --type ios \
+            --file "$IPA" \
+            --apiKey "$APPSTORE_KEY_ID" \
+            --apiIssuer "$APPSTORE_ISSUER_ID"
+
+          echo "=========================================="
+          echo "✅ IPA UPLOAD COMPLETED"
+          echo "=========================================="
+
+
+      # =========================================================
+      # 23. UPLOAD IPA ARTIFACT
       # =========================================================
 
       - name: Upload IPA Artifact
@@ -974,7 +1068,7 @@ jobs:
 
 
       # =========================================================
-      # 23. CLEANUP
+      # 24. CLEANUP
       # =========================================================
 
       - name: Cleanup
@@ -993,5 +1087,7 @@ jobs:
           if [ -n "${SIGNING_DIR:-}" ]; then
             rm -rf "$SIGNING_DIR"
           fi
+
+          rm -rf "$HOME/.appstoreconnect/private_keys"
 
           echo "✅ CLEANUP COMPLETE"
