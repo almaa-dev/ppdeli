@@ -35,7 +35,11 @@ class ProfileService implements ProfileServiceInterface {
   Future<Response> deleteUser() async {
     return await profileRepositoryInterface.delete(null);
   }
-
+  @override
+  Future<Response> deleteAccountByPhone(String phone) async {
+    return await profileRepositoryInterface.deleteAccountByPhone(phone);
+  }
+  
   @override
   Future<XFile?> pickImageFromGallery() async {
     XFile? pickedFile;

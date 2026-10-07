@@ -1,0 +1,248 @@
+name: Build Flutter iOS
+
+# Controls when the workflow will run
+on:
+  push:
+    branches: [ "main" ] # Triggers the build on every push to the main branch
+  pull_request:
+    branches: [ "main" ] # Triggers the build for pull requests targeting main
+  workflow_dispatch: # Allows you to run this workflow manually from the Actions tab
+
+jobs:
+  # ================================================================
+  # Job 1: Build for iOS Simulator (no code signing required)
+  #         This is the most useful CI job because it verifies the
+  #         entire toolchain compiles your app without needing
+  #         certificates or provisioning profiles.
+  # ================================================================
+  build-simulator:
+    name: Build iOS Simulator
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      # ----------------------------------------------------------
+      # Step 1: Check out the repository
+      # ----------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------
+      # Step 2: Setup Java 17 (needed by Gradle / Flutter)
+      # ----------------------------------------------------------
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # ----------------------------------------------------------
+      # Step 3: Setup Flutter SDK
+      # ----------------------------------------------------------
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'   # Required by pubspec.yaml (Dart SDK ^3.11.0)
+          channel: 'stable'
+          cache: true                 # Caches Flutter SDK + pub deps
+
+      # ----------------------------------------------------------
+      # Step 4: Install CocoaPods (required by iOS native deps)
+      # ----------------------------------------------------------
+      - name: Setup CocoaPods
+        uses: maxim-lobanov/setup-cocoapods@v1
+        with:
+          version: 'latest'
+
+      # ----------------------------------------------------------
+      # Step 5: Disable Flutter analytics
+      # ----------------------------------------------------------
+      - name: Disable Flutter Analytics
+        run: flutter config --no-analytics
+
+      # ----------------------------------------------------------
+      # Step 6: Print tool versions (helpful for debugging)
+      # ----------------------------------------------------------
+      - name: Print versions
+        run: |
+          flutter --version
+          pod --version
+          xcodebuild -version
+
+      # ----------------------------------------------------------
+      # Step 7: Install Flutter packages
+      # ----------------------------------------------------------
+      - name: Install dependencies
+        run: flutter pub get
+
+      # ----------------------------------------------------------
+      # Step 8: Generate code with build_runner
+      #         (required for Drift database, etc.)
+      # ----------------------------------------------------------
+      - name: Generate code (build_runner)
+        run: dart run build_runner build --delete-conflicting-outputs
+        continue-on-error: true
+
+      # ----------------------------------------------------------
+      # Step 9: Install CocoaPods (must run inside /ios)
+      # ----------------------------------------------------------
+      - name: Install CocoaPods dependencies
+        working-directory: ios
+        run: pod install
+
+      # ----------------------------------------------------------
+      # Step 10: Build the .app for the iOS Simulator
+      #         --debug         : fastest, most reliable CI build
+      #         --simulator     : builds for x86_64 / arm64-simulator
+      #         (no code signing required)
+      # ----------------------------------------------------------
+      - name: Build iOS Simulator
+        run: flutter build ios --debug --simulator
+
+      # ----------------------------------------------------------
+      # Step 11: Upload the .app as a GitHub Actions artifact
+      # ----------------------------------------------------------
+      - name: Upload .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: build/ios/iphonesimulator/Runner.app
+          if-no-files-found: error
+          retention-days: 14
+
+  # ================================================================
+  # Job 2: Release / Archive build (requires Apple signing secrets)
+  #
+  # To enable this job, you must:
+  #   1. Remove the `if: false` line below.
+  #   2. Add these Secrets in your repo (Settings → Secrets → Actions):
+  #        - IOS_P12_BASE64       : base64 of your Distribution .p12
+  #        - IOS_P12_PASSWORD     : password for the .p12 file
+  #        - IOS_BUILD_PROVISION  : base64 of the provisioning profile
+  #   3. The .p12 will be installed into a temporary keychain and the
+  #      profile copied into ~/Library/MobileDevice/Provisioning Profiles.
+  # ================================================================
+  archive-release:
+    name: Archive iOS Release (requires signing secrets)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    if: false   # <-- Set to `false` until you configure signing secrets
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'   # Required by pubspec.yaml (Dart SDK ^3.11.0)
+          channel: 'stable'
+          cache: true
+
+      - name: Setup CocoaPods
+        uses: maxim-lobanov/setup-cocoapods@v1
+        with:
+          version: 'latest'
+
+      - name: Disable Flutter Analytics
+        run: flutter config --no-analytics
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate code (build_runner)
+        run: dart run build_runner build --delete-conflicting-outputs
+        continue-on-error: true
+
+      # --------------- Import signing assets ---------------
+      - name: Import distribution certificate
+        env:
+          P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 24)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychains -d user -s $KEYCHAIN_PATH
+          echo "$P12_BASE64" | base64 --decode > $RUNNER_TEMP/cert.p12
+          security import $RUNNER_TEMP/cert.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -s -k $KEYCHAIN_PATH
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+
+      - name: Install provisioning profile
+        env:
+          PROVISION_BASE64: ${{ secrets.IOS_BUILD_PROVISION }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$PROVISION_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/build.mobileprovision
+
+      # --------------- Install CocoaPods ---------------
+      - name: Install CocoaPods dependencies
+        working-directory: ios
+        run: pod install
+
+      # --------------- Build the archive ---------------
+      - name: Build iOS Release Archive
+        working-directory: ios
+        run: |
+          xcodebuild -workspace Runner.xcworkspace \
+                     -scheme Runner \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -destination 'generic/platform=iOS' \
+                     -archivePath ${{ github.workspace }}/build/Runner.xcarchive \
+                     CODE_SIGN_STYLE=Manual \
+                     CODE_SIGNING_REQUIRED=YES \
+                     CODE_SIGN_IDENTITY="Apple Distribution" \
+                     CODE_SIGNING_ALLOWED=YES \
+                     archive
+
+      # --------------- Export the IPA ---------------
+      - name: Export IPA
+        working-directory: ios
+        env:
+          KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+          KEYCHAIN_PASSWORD: ${{ env.KEYCHAIN_PASSWORD }}
+        run: |
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>teamID</key>
+              <string>YOUR_APPLE_TEAM_ID</string>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+                     -archivePath ${{ github.workspace }}/build/Runner.xcarchive \
+                     -exportPath ${{ github.workspace }}/build/ios-export \
+                     -exportOptionsPlist ExportOptions.plist
+
+      - name: Cleanup keychain
+        if: always()
+        env:
+          KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+        run: |
+          security delete-keychain $KEYCHAIN_PATH || true
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-ipa
+          path: build/ios-export/*.ipa
+          if-no-files-found: error
+          retention-days: 14

@@ -12,7 +12,6 @@ import 'package:pickles_and_pies/util/app_constants.dart';
 import 'package:pickles_and_pies/util/dimensions.dart';
 import 'package:pickles_and_pies/util/images.dart';
 import 'package:pickles_and_pies/util/styles.dart';
-import 'package:pickles_and_pies/common/widgets/confirmation_dialog.dart';
 import 'package:pickles_and_pies/common/widgets/custom_image.dart';
 import 'package:pickles_and_pies/common/widgets/footer_view.dart';
 import 'package:pickles_and_pies/common/widgets/menu_drawer.dart';
@@ -224,15 +223,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   icon: Icons.delete_outline, title: 'delete_account'.tr,
                   iconImage: Images.deleteProfile,
                   color: Theme.of(context).colorScheme.error,
-                  onTap: () {
-                    Get.dialog(ConfirmationDialog(
-                      icon: Images.warning,
-                      title: 'delete_account_dialog_title'.tr,
-                      description: 'delete_account_dialog_message'.tr,
-                      isLogOut: true,
-                      onYesPressed: () => profileController.deleteUser(),
-                    ), useSafeArea: false);
-                  },
+                  onTap: () => profileController.deleteUser(),
                 ) : const SizedBox(),
                 SizedBox(height: isLoggedIn ? Dimensions.paddingSizeLarge : 0),
 

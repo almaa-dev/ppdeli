@@ -15,7 +15,6 @@ import 'package:pickles_and_pies/helper/route_helper.dart';
 import 'package:pickles_and_pies/util/dimensions.dart';
 import 'package:pickles_and_pies/util/images.dart';
 import 'package:pickles_and_pies/util/styles.dart';
-import 'package:pickles_and_pies/common/widgets/confirmation_dialog.dart';
 import 'package:pickles_and_pies/common/widgets/custom_image.dart';
 import 'package:pickles_and_pies/features/profile/widgets/profile_button_widget.dart';
 import 'package:pickles_and_pies/features/profile/widgets/profile_card_widget.dart';
@@ -126,13 +125,11 @@ class WebProfileWidget extends StatelessWidget {
                 child: Align(
                   alignment: Alignment.bottomRight,
                   child: InkWell(
-                    onTap: () {
-                      Get.dialog(ConfirmationDialog(icon: Images.support,
-                        title: 'are_you_sure_to_delete_account'.tr,
-                        description: 'it_will_remove_your_all_information'.tr, isLogOut: true,
-                        onYesPressed: () => profileController.deleteUser(),
-                      ), useSafeArea: false);
-                    },
+                    // The full flow (confirmation → non-dismissible loading →
+                    // success dialog → local data wipe → 5-second wait →
+                    // Sign-In) is owned by `ProfileController.deleteUser()`,
+                    // so we just kick it off here.
+                    onTap: () => profileController.deleteUser(),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Image.asset(Images.profileDelete, height: 20, width: 20),
                       const SizedBox(width: Dimensions.paddingSizeSmall),

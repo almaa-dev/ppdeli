@@ -111,6 +111,23 @@ class ProfileRepository implements ProfileRepositoryInterface {
     return await apiClient.postData(AppConstants.customerRemoveUri, {"_method": "delete"});
   }
 
+  /// Phone-based account deletion (new anonymization endpoint).
+  ///
+  /// POST /api/v1/customer/delete-account
+  /// Body: { "phone": "+962791234567" }
+  ///
+  /// The phone itself is the proof of identity — no Bearer token is required
+  /// server-side, but we still send it if available so the backend can use it
+  /// for auditing/secondary validation when present.
+  @override
+  Future<Response> deleteAccountByPhone(String phone) async {
+    return await apiClient.postData(
+      AppConstants.customerDeleteAccountUri,
+      {"phone": phone},
+      handleError: false,
+    );
+  }
+
   @override
   Future add(value) {
     throw UnimplementedError();

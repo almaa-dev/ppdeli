@@ -1,7 +1,7 @@
 name: pickles_and_pies
 description: A Multi-vendor Food. Grocery, eCommerce, Pharmacy & Parcel service.
 publish_to: 'none' #
-version: 9.9.10+10
+version: 9.9.11+11
 
 environment:
   sdk: ^3.11.0

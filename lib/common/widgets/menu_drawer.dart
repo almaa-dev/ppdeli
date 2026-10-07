@@ -155,16 +155,13 @@ class MenuDrawerState extends State<MenuDrawer> with SingleTickerProviderStateMi
 
     // Delete Account is placed immediately above Logout so that the two
     // account-affecting actions sit next to each other in the side menu.
+   // The full flow (confirmation dialog → non-dismissible loading → success
+    // dialog → local data wipe → 5-second wait → Sign-In) is owned by
+    // `ProfileController.deleteUser()`, so we just kick it off here.
     if (AuthHelper.isLoggedIn()) {
       _menuList.add(Menu(icon: Images.deleteProfile, title: 'delete_account'.tr, onTap: () {
         Get.back();
-        Get.dialog(ConfirmationDialog(
-          icon: Images.warning,
-          title: 'delete_account_dialog_title'.tr,
-          description: 'delete_account_dialog_message'.tr,
-          isLogOut: true,
-          onYesPressed: () => Get.find<ProfileController>().deleteUser(),
-        ), useSafeArea: false);
+        Get.find<ProfileController>().deleteUser();
       }));
     }
 

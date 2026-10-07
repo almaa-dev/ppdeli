@@ -10,5 +10,9 @@ abstract class ProfileServiceInterface {
   Future<ResponseModel> updateProfile(UpdateUserModel userInfoModel, XFile? data, String token);
   Future<ResponseModel> changePassword(UserInfoModel userInfoModel);
   Future<Response> deleteUser();
+  
+  /// Phone-based account deletion (new anonymization endpoint).
+  /// POST /api/v1/customer/delete-account with body `{ "phone": "..." }`.
+  Future<Response> deleteAccountByPhone(String phone);
   Future<XFile?> pickImageFromGallery();
 }

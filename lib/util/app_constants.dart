@@ -99,6 +99,16 @@ class AppConstants {
   static const String shippingPolicyUri = '/api/v1/shipping-policy';
   static const String subscriptionUri = '/api/v1/newsletter/subscribe';
   static const String customerRemoveUri = '/api/v1/customer/remove-account';
+    /// New phone-based account deletion endpoint (anonymization, not hard delete).
+  /// Registered OUTSIDE the `auth:api` middleware group on the Laravel side,
+  /// so the phone itself is the proof of identity.
+  /// Body: { "phone": "+962791234567" }
+  /// Responses:
+  ///   200 → { response_code: "account_deleted_200" / "account_already_deleted_200", message: "..." }
+  ///   422 → { response_code: "invalid_phone", ... }
+  ///   404 → { response_code: "phone_not_found", ... }
+  ///   500 → { response_code: "deletion_failed", ... }
+  static const String customerDeleteAccountUri = '/api/v1/customer/delete-account';
   static const String walletTransactionUri = '/api/v1/customer/wallet/transactions';
   static const String loyaltyTransactionUri = '/api/v1/customer/loyalty-point/transactions';
   static const String loyaltyPointTransferUri = '/api/v1/customer/loyalty-point/point-transfer';
