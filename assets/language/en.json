@@ -283,10 +283,10 @@
   "maximum_discount": "Maximum Discount",
   "minimum_order_amount_is": "Minimum order amount is",
   "you_got_discount_of": "You got discount of",
-  "are_you_agree_with_this_order_fail": "Are you agree with this order fail?",
-  "if_you_do_not_pay": "If you do not continue with your order payment system then your order will be failed. You can switch your order to Cash On Delivery now.",
+  "are_you_agree_with_this_order_fail": "Order Incomplete",
+  "if_you_do_not_pay": "If you do not continue with your order payment system then your order will be failed. You can switch your order to Cash On Collection now.",
   "continue_with_order_fail": "Continue with Order Fail",
-  "switch_to_cash_on_delivery": "Switch to Cash On Delivery",
+  "switch_to_cash_on_delivery": "Switch to Cash On Collection",
   "results_found": "results found",
   "additional_note": "Additional Notes",
   "no_suggestions_available": "No suggestions available",
@@ -2328,5 +2328,6 @@
   "cash_on_delivery_full": "Cash on Collection",
   "wallet_payment_full": "Wallet Payment",
   "digital_payment_full": "Digital Payment",
+  "sorry_this_module_is_not_available_in_your_location": "Sorry this module is not available in your location",
   "offline_payment_full": "Offline Payment"
 }

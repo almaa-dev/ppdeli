@@ -1424,12 +1424,14 @@ class StoreController extends GetxController implements GetxService {
 
   void shareStore() {
     if(ResponsiveHelper.isDesktop(Get.context)){
-      String shareUrl = '${AppConstants.webHostedUrl}${filteringUrl(store!.slug ?? '')}';
+      // String shareUrl = '${AppConstants.webHostedUrl}${filteringUrl(store!.slug ?? '')}';
+      String shareUrl = 'https://www.picklesandpiesdeli.com/';
 
       Clipboard.setData(ClipboardData(text: shareUrl));
       showCustomSnackBar('store_url_copied'.tr, isError: false);
     } else {
-      String shareUrl = '${AppConstants.webHostedUrl}${filteringUrl(store!.slug ?? '')}';
+      String shareUrl = 'https://www.picklesandpiesdeli.com/';
+      // String shareUrl = '${AppConstants.webHostedUrl}${filteringUrl(store!.slug ?? '')}';
       SharePlus.instance.share(ShareParams(text: shareUrl));
     }
   }
